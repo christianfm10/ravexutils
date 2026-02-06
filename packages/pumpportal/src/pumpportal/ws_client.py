@@ -1,9 +1,11 @@
 import logging
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
-from telegram import tg_bot
+
+if TYPE_CHECKING:
+    from shared_lib.client_context import ClientContext
 
 ROOM_NEW_TOKEN = "subscribeNewToken"
 ROOM_MIGRATION = "subscribeMigration"
@@ -22,24 +24,70 @@ class PumpPortalWSClient(WebSocketClient):
 
     WS_PUMP_PORTAL = "wss://pumpportal.fun/api/data"
 
-    # _instance = None
-    # _initialized = False
+    def __init__(self, context: "ClientContext | None" = None, **kwargs) -> None:
+        """
+        Initialize PumpPortal WebSocket client.
 
-    # def __new__(cls):
-    #     if cls._instance is None:
-    #         cls._instance = super().__new__(cls)
-    #     return cls._instance
+        ## Parameters:
+        - `context` (ClientContext | None, optional): Shared client context.
+            - **Recommended**: Pass configuration via context for cleaner API
+            - Contains telegram_bot, log_level, and other shared dependencies
+            - See `ClientContext` documentation for details
 
-    def __init__(self) -> None:
+        - `**kwargs`: Additional keyword arguments passed to parent `WebSocketClient`.
+            - Can override context values if needed
+            - See `WebSocketClient.__init__` for complete parameter documentation
+
+        ## Initialized Attributes:
+        - Inherits all attributes from `WebSocketClient`
+        - `_subs_mints` (list[str]): Tracked token mint addresses for trade monitoring
+        - `_subs_accounts` (list[str]): Tracked account public keys for trade monitoring
+        - `logger`: Specialized logger for "PumpPortalWSClient"
+
+        ## Available Subscriptions:
+        - **New Tokens**: `subscribe_new_token()` - Monitor newly created tokens
+        - **Migrations**: `subscribe_migration()` - Track token migrations to Raydium
+        - **Token Trades**: `subscribe_token_trade(keys=[...])` - Monitor specific token trades
+        - **Account Trades**: `subscribe_account_trade(keys=[...])` - Monitor specific wallet trades
+
+        ## Example:
+        ```python
+        from shared_lib.client_context import ClientContext
+        from telegram.setup import TelegramBot
+
+        # Modern approach - with context (recommended)
+        tg_bot = TelegramBot()
+        context = ClientContext(telegram_bot=tg_bot, log_level=logging.DEBUG)
+        client = PumpPortalWSClient(context=context)
+
+        # Legacy approach - still supported
+        client = PumpPortalWSClient(telegram_bot=tg_bot, log_level=logging.DEBUG)
+
+        # Usage
+        await client.connect()
+        await client.subscribe_new_token(my_callback)
+        await client.start()
+        ```
+
+        ## Design Pattern:
+        - Uses **ClientContext** for dependency injection (testable, flexible)
+        - Inherits connection management from `WebSocketClient`
+        - Automatically reconnects and restores subscriptions on disconnect
+        - Thread-safe subscription tracking
+
+        ## Notes:
+        - Singleton pattern enabled by default
+        - Fixed WebSocket URL: `wss://pumpportal.fun/api/data`
+        - Subscription keys stored for reconnection recovery
+        """
         # Only initialize once
         # if self._initialized:
         #     return
 
-        super().__init__(ws_url=WS_PRIMARY_URL)
+        super().__init__(context=context, ws_url=WS_PRIMARY_URL, **kwargs)
         self._subs_mints: list[str] = []
         self._subs_accounts: list[str] = []
         self.logger = logging.getLogger("PumpPortalWSClient")
-        # self._initialized = True
 
     async def _route_message(self, room: str, data: dict[str, Any]) -> None:
         """
@@ -271,7 +319,8 @@ class PumpPortalWSClient(WebSocketClient):
 
     async def _send_notification(self, message: str) -> None:
         show_alert(title="PumpPortal Notification", message=message)
-        await tg_bot.send_message(message)
+        if self._telegram_bot is not None:
+            await self._telegram_bot.send_message(message)
 
 
 pf_ws_client = PumpPortalWSClient()

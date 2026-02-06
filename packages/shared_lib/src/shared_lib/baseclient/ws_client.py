@@ -2,8 +2,11 @@ import websockets
 import asyncio
 import logging
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from telegram import TelegramBot
+    from shared_lib.client_context import ClientContext
 
 WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
 
@@ -12,14 +15,100 @@ class WebSocketClient:
     HEADERS = {}
 
     def __init__(
-        self, log_level: int = logging.INFO, ws_url: str = WS_PRIMARY_URL
+        self,
+        context: Optional["ClientContext"] = None,
+        log_level: Optional[int] = None,
+        ws_url: str = WS_PRIMARY_URL,
+        telegram_bot: Optional["TelegramBot"] = None,
     ) -> None:
+        """
+        Initialize WebSocket client with connection and notification settings.
+
+        ## Parameters:
+        - `context` (ClientContext | None, optional): Shared client context with dependencies.
+            - **Recommended approach**: Pass all shared config via context
+            - If provided, extracts `telegram_bot` and `log_level` from context
+            - Individual parameters override context values
+            - See `ClientContext` documentation for details
+
+        - `log_level` (int | None, optional): Logging level for client operations.
+            - Default: `logging.INFO` (or from context)
+            - Options: `logging.DEBUG`, `logging.INFO`, `logging.WARNING`, `logging.ERROR`
+            - Overrides context.log_level if both provided
+
+        - `ws_url` (str, optional): WebSocket server URL to connect to.
+            - Default: `WS_PRIMARY_URL` ("wss://pumpportal.fun/api/data")
+            - Must be a valid WSS (secure WebSocket) URL
+
+        - `telegram_bot` (TelegramBot | None, optional): Telegram bot instance for notifications.
+            - Default: `None` (or from context)
+            - Overrides context.telegram_bot if both provided
+            - **Deprecated**: Use `context` parameter instead for cleaner API
+
+        ## Initialized Attributes:
+        - `ws_url`: Stored WebSocket URL
+        - `ws`: WebSocket connection (initially None)
+        - `_callbacks`: Registry for message routing callbacks
+        - `logger`: Logger instance for debugging
+        - `_telegram_bot`: Optional Telegram bot for notifications
+
+        ## Example:
+        ```python
+        from shared_lib.client_context import ClientContext
+        from telegram.setup import TelegramBot
+
+        # Modern approach - with context (recommended)
+        tg_bot = TelegramBot()
+        context = ClientContext(telegram_bot=tg_bot, log_level=logging.DEBUG)
+        client = WebSocketClient(context=context)
+
+        # Legacy approach - direct parameters (still supported)
+        client = WebSocketClient(
+            log_level=logging.DEBUG,
+            telegram_bot=tg_bot
+        )
+
+        # Override context values
+        client = WebSocketClient(
+            context=context,
+            log_level=logging.WARNING  # Override context log_level
+        )
+        ```
+
+        ## Migration Guide:
+        ```python
+        # Before:
+        client = WebSocketClient(
+            telegram_bot=tg_bot,
+            log_level=logging.DEBUG
+        )
+
+        # After:
+        context = ClientContext(
+            telegram_bot=tg_bot,
+            log_level=logging.DEBUG
+        )
+        client = WebSocketClient(context=context)
+        ```
+        """
+        # Extract values from context if provided, allow individual params to override
+        effective_log_level = (
+            log_level
+            if log_level is not None
+            else (context.log_level if context else logging.INFO)
+        )
+        effective_telegram_bot = (
+            telegram_bot
+            if telegram_bot is not None
+            else (context.telegram_bot if context else None)
+        )
+
         self.ws_url = ws_url
         self.ws: Any = None  # Main WebSocket for regular channels
         self._callbacks: dict[str, Callable[[dict[str, Any]], Awaitable[None]]] = {}
         # Setup logger for debugging and monitoring
         self.logger = logging.getLogger("WebSocketClient")
-        self.logger.setLevel(log_level)
+        self.logger.setLevel(effective_log_level)
 
         # Reconnection configuration
         self._max_reconnect_attempts = 5
@@ -28,6 +117,9 @@ class WebSocketClient:
         #
         # Store subscriptions for reconnection
         self._active_subscriptions: dict[str, Any] = {}
+
+        # Initialize Telegram bot if provided
+        self._telegram_bot = effective_telegram_bot
 
     async def start(self) -> None:
         """

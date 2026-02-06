@@ -1,7 +1,7 @@
-from .ws_client import pf_ws_client
+from .ws_client import PumpPortalWSClient
 from .trade import buy_tokens, sell_tokens
 
-__all__ = ["pf_ws_client", "buy_tokens", "sell_tokens"]
+__all__ = ["PumpPortalWSClient", "buy_tokens", "sell_tokens"]
 
 
 def main() -> None:

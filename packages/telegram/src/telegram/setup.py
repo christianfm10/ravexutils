@@ -38,6 +38,3 @@ class TelegramBot:
                 )
             except Exception as e:
                 logger.error(f"Failed to send Telegram notification: {e}")
-
-
-tg_bot = TelegramBot()

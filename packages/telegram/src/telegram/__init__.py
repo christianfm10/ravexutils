@@ -1,6 +1,6 @@
-from .setup import tg_bot
+from .setup import TelegramBot
 
-__all__ = ["tg_bot"]
+__all__ = ["TelegramBot"]
 
 
 def main():
