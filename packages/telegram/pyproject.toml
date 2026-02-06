@@ -1,0 +1,10 @@
+[project]
+name = "telegram"
+version = "0.1.0"
+description = "Utilidades de Telegram para ravexutils"
+dependencies = ["aiogram>=3.23.0"]
+requires-python = ">=3.14"
+
+# Script for examples/telegram/telegram_bot_example.py
+[project.scripts]
+telegram = "telegram:main"

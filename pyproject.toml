@@ -1,0 +1,16 @@
+[tool.uv.sources]
+telegram = { workspace = true }
+cloudflare = { workspace = true }
+pumpfun = { workspace = true }
+pumpportal = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "packages/telegram",
+    "packages/cloudflare",
+    "packages/shared_lib",
+    "packages/pumpfun",
+    "packages/pumpportal",
+]
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "ruff"]

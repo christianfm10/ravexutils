@@ -1,0 +1,19 @@
+[project]
+name = "pumpfun"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "christianfm10", email = "christian.flores@dekoding.pe" }]
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+pumpfun = "pumpfun:main"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
