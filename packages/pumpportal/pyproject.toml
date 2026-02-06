@@ -3,11 +3,9 @@ name = "pumpportal"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "christianfm10", email = "christian.flores@dekoding.pe" }
-]
+authors = [{ name = "christianfm10", email = "christian.flores@dekoding.pe" }]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = ["shared_lib", "httpx"]
 
 [project.scripts]
 pumpportal = "pumpportal:main"
