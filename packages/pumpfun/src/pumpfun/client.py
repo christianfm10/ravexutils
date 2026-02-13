@@ -64,7 +64,7 @@ class PumpfunClient(BaseClient):
         Obtiene las memecoins creadas por un usuario específico en Pump.fun.
         """
 
-        endpoint = f"/coins/user-created-coins/{user_id}"
+        endpoint = f"/coins-v2/user-created-coins/{user_id}"
         params = {"offset": 0, "limit": 10, "includeNsfw": "false"}
         params.update(**kwargs)
 

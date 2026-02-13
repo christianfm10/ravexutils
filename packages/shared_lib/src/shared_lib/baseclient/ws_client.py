@@ -462,8 +462,9 @@ class WebSocketClient:
 
                 try:
                     # Close existing connection if any
-                    await self.ws.close()
-                    self.ws = None
+                    if self.ws:
+                        await self.ws.close()
+                        self.ws = None
 
                     # Attempt reconnection
                     success = await self.connect()

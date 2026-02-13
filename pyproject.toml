@@ -4,6 +4,7 @@ cloudflare = { workspace = true }
 pumpfun = { workspace = true }
 pumpportal = { workspace = true }
 shared-lib = { workspace = true }
+rpc = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -12,6 +13,7 @@ members = [
     "packages/shared_lib",
     "packages/pumpfun",
     "packages/pumpportal",
+    "packages/rpc",
 ]
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "ruff"]

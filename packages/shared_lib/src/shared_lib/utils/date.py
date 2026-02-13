@@ -4,6 +4,36 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 
+def timestamp_to_datetime(
+    timestamp: int | float, milliseconds: bool = True
+) -> datetime | None:
+    """
+    Convert a Unix timestamp to a datetime object.
+
+    ## Parameters
+    - `timestamp`: Unix timestamp (e.g., 1700000000 or 1770069888028)
+    - `milliseconds`: True if timestamp is in ms (13 digits), False if in seconds (10 digits)
+
+    ## Returns
+    - `datetime` object representing the timestamp in UTC
+
+    ## Notes
+    Gracefully handles malformed timestamps by logging and returning None.
+    """
+
+    try:
+        # Convert to seconds if needed
+        ts_seconds = timestamp / 1000 if milliseconds else timestamp
+
+        # Convert Unix timestamp → datetime UTC
+        dt = datetime.fromtimestamp(ts_seconds, tz=timezone.utc)
+        return dt
+
+    except (ValueError, OSError, TypeError) as e:
+        logger.error(f"Failed to parse unix timestamp '{timestamp}': {e}")
+        return None
+
+
 def is_timestamp_older_than(
     timestamp: str, seconds: int | None = None, minutes: int | None = None
 ) -> bool:

@@ -1,5 +1,5 @@
 [project]
-name = "pumpfun"
+name = "rpc"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -8,12 +8,8 @@ requires-python = ">=3.14"
 dependencies = ["shared_lib"]
 
 [project.scripts]
-pumpfun = "pumpfun:main"
+rpc = "rpc:main"
 
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
