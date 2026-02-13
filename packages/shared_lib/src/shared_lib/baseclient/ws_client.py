@@ -344,7 +344,7 @@ class WebSocketClient:
 
             # Send Telegram notification about disconnection
             await self._send_notification(
-                f"⚠️ <b>WebSocket PumpPortal Disconnected</b>\n"
+                f"⚠️ <b>WebSocket {self.__class__.__name__} Disconnected</b>\n"
                 f"Connection: main\n"
                 f"Code: {e.code}\n"
                 f"Reason: {e.reason or 'Unknown'}\n"
@@ -489,7 +489,7 @@ class WebSocketClient:
 
                     # Send Telegram notification about successful reconnection
                     await self._send_notification(
-                        f"✅ <b>WebSocket PumpPortal Reconnected</b>\n"
+                        f"✅ <b>WebSocket {self.__class__.__name__} Reconnected</b>\n"
                         f"Connection: {connection_type}\n"
                         f"Status: Successfully restored after {attempt} attempt(s)"
                     )
