@@ -163,14 +163,14 @@ class NotificationManager:
             return False
 
         try:
-            result = subprocess.run(
+            p = subprocess.Popen(
                 ["xclip", "-selection", "clipboard"],
-                input=data.encode(),
-                capture_output=True,
-                timeout=5,
+                stdin=subprocess.PIPE,
+                close_fds=True,
             )
-            if result.returncode != 0:
-                logger.error(f"xclip failed: {result.stderr.decode()}")
+            p.communicate(input=data.encode())
+            if p.returncode != 0:
+                logger.error("xclip failed")
                 return False
             return True
         except subprocess.TimeoutExpired:
