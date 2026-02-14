@@ -378,7 +378,7 @@ class WebSocketClient:
         try:
             # Send join message to server
             await self._send_message(method, keys)
-            self.logger.info(f"✅ Subscribed to {method} monitor")
+            self.logger.info(f"✅ Subscribed to {method} monitor with keys: {keys}")
             return True
         except Exception as e:
             self.logger.error(f"❌ Failed to subscribe to {method} monitor: {e}")

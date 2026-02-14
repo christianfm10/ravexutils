@@ -53,9 +53,7 @@ def create_callbacks(ws_client: "PumpPortalWSClient"):
             return
 
         if counter < 3:
-            await ws_client.subscribe_token_trade(
-                callback=token_trade_callback, keys=[data["mint"]]
-            )
+            await ws_client.add_token_trade_keys(keys=[data["mint"]])
             buyed_tokens[data["mint"]] = data["marketCapSol"]
             counter = counter + 1
 
@@ -75,7 +73,7 @@ def create_callbacks(ws_client: "PumpPortalWSClient"):
                 await ws_client._send_notification(
                     f"🚀 Token {data['mint']} has increased by {profit_loss:.2f}%!\nBuy Price: {buy_price} SOL\nCurrent Price: {current_price} SOL"
                 )
-                await ws_client.unsubscribe_token_trade(keys=[data["mint"]])
+                await ws_client.remove_token_trade_keys(keys=[data["mint"]])
             else:
                 logger.info(
                     f"Token {data['mint']} Trade Update: Current Price: {current_price} SOL, Buy Price: {buy_price} SOL, P/L: {profit_loss:.2f}%"

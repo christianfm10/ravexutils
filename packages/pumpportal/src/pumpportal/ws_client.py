@@ -187,6 +187,38 @@ class PumpPortalWSClient(WebSocketClient):
         }
         await self.subscribe_method(ROOM_ACCOUNT_TRADE, callback, keys)
 
+    async def add_token_trade_keys(self, keys: list = []):
+        """
+        Add keys to existing token trade subscription.
+        """
+        subscription = self._active_subscriptions.get(ROOM_TOKEN_TRADE, {})
+        if subscription:
+            self._subs_mints.extend(keys)
+            self._active_subscriptions[ROOM_TOKEN_TRADE]["keys"] = self._subs_mints
+            await self.subscribe_method(
+                ROOM_TOKEN_TRADE,
+                self._active_subscriptions[ROOM_TOKEN_TRADE]["callback"],
+                keys,
+            )
+        else:
+            self.logger.warning(
+                "No active token trade subscription found to update. Please subscribe first."
+            )
+
+    async def remove_token_trade_keys(self, keys: list = []):
+        """
+        Remove keys from existing token trade subscription.
+        """
+        subscription = self._active_subscriptions.get(ROOM_TOKEN_TRADE, {})
+        if subscription:
+            self._subs_mints = [k for k in self._subs_mints if k not in keys]
+            self._active_subscriptions[ROOM_TOKEN_TRADE]["keys"] = self._subs_mints
+            await self.unsubscribe_method(f"un{ROOM_TOKEN_TRADE}", keys)
+        else:
+            self.logger.warning(
+                "No active token trade subscription found to update. Please subscribe first."
+            )
+
     async def subscribe_token_trade(
         self, callback: Callable[[dict[str, Any]], Awaitable[None]], keys: list = []
     ):

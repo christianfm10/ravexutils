@@ -11,6 +11,7 @@ from rpc.models import (
     RPCGetTokenAccountsByOwnerResult,
     RPCGetTokenAccountsResult,
     RPCGetTransactionResult,
+    RPCSignatureInfo,
 )
 from shared_lib.utils.cex import CEXs
 
@@ -463,7 +464,12 @@ class RPC_Client(Client):
                 break
 
     async def fetch_and_process_wallet_signatures(
-        self, address: str, page_size: int = 10, max_pages: int = 5
+        self,
+        address: str,
+        page_size: int = 10,
+        max_pages: int = 5,
+        handle_signature_callback: Callable[[RPCSignatureInfo], Awaitable[None]]
+        | None = None,
     ):
         before = None
         for page in range(max_pages):
@@ -476,9 +482,9 @@ class RPC_Client(Client):
             before = result.signatures[-1].signature if result.signatures else None
 
             for signature in result.signatures:
-                print(f"  Signature: {signature.signature}")
-                print(f"    Slot: {signature.slot}")
-                print(f"    Confirmation Status: {signature.confirmationStatus}")
+                await handle_signature_callback(
+                    signature
+                ) if handle_signature_callback else None
 
             if len(result.signatures) < page_size:
                 print("No more signatures to fetch.")
