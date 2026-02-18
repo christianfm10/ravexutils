@@ -13,6 +13,7 @@ import logging
 import httpx
 
 from .exceptions import HTTPError, ProxyError, ConfigurationError
+from .tls import create_tls_context
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ class BaseClient(ABC):
         proxy: str | None = None,
         cf_clearance: str | None = None,
         timeout: float = 30.0,
+        use_tls_fingerprint: bool = False,
+        ecdh_curve: str | None = None,
+        cipher_suite: str | None = None,
         **kwargs: Any,
     ):
         """
@@ -65,6 +69,9 @@ class BaseClient(ABC):
             cf_clearance: Cloudflare clearance cookie value for bypassing
                          Cloudflare protection.
             timeout: Request timeout in seconds. Defaults to 30.0.
+            use_tls_fingerprint: Enable browser-like TLS fingerprinting.
+            ecdh_curve: ECDH curve for TLS. Defaults to "secp384r1".
+            cipher_suite: Custom cipher suite. Uses browser-like suite by default.
             **kwargs: Additional arguments passed to httpx.AsyncClient.
                      Common options include:
                      - headers: Custom headers dict
@@ -103,6 +110,20 @@ class BaseClient(ABC):
         # Set default timeout
         if "timeout" not in kwargs:
             kwargs["timeout"] = timeout
+
+        # Configure TLS fingerprinting if requested
+        if use_tls_fingerprint:
+            if "verify" not in kwargs:
+                ssl_context = create_tls_context(
+                    ecdh_curve=ecdh_curve,
+                    cipher_suite=cipher_suite,
+                )
+                kwargs["verify"] = ssl_context
+                logger.debug("TLS fingerprinting enabled")
+            else:
+                logger.warning(
+                    "TLS fingerprinting requested but 'verify' already set in kwargs"
+                )
 
         # Initialize httpx client
         self.client = httpx.AsyncClient(cookies=self.cookies, **kwargs)
