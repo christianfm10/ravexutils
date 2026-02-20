@@ -138,6 +138,7 @@ class PumpPortalWSClient(WebSocketClient):
             return
 
     async def _message_handler(self, message: str) -> None:
+        """Parse and route PumpPortal messages."""
         # Parse JSON message
         data = json.loads(message)
         if "message" in data:
@@ -159,6 +160,28 @@ class PumpPortalWSClient(WebSocketClient):
             await self._route_message(room, data)
         else:
             self.logger.debug(f"No callback found for message: {data}")
+
+    async def _send_notification(self, message: str) -> None:
+        """Send notification via system alert and Telegram."""
+        show_alert(title="PumpPortal Notification", message=message)
+        if self._telegram_bot is not None:
+            await self._telegram_bot.send_message(message)
+
+    async def _build_subscribe_message(self, method: str, **kwargs) -> dict[str, Any]:
+        """Build PumpPortal-specific subscription message.
+
+        PumpPortal format: {"method": "subscribeNewToken", "keys": [...]}
+        """
+        keys = kwargs.get("keys", [])
+        return {"method": method, "keys": keys}
+
+    async def _build_unsubscribe_message(self, method: str, **kwargs) -> dict[str, Any]:
+        """Build PumpPortal-specific unsubscription message.
+
+        PumpPortal format: {"method": "unsubscribeNewToken", "keys": [...]}
+        """
+        keys = kwargs.get("keys", [])
+        return {"method": method, "keys": keys}
 
     async def subscribe_new_token(
         self, callback: Callable[[dict[str, Any]], Awaitable[None]]
@@ -185,12 +208,10 @@ class PumpPortalWSClient(WebSocketClient):
             "callback": callback,
             "keys": self._subs_accounts,
         }
-        await self.subscribe_method(ROOM_ACCOUNT_TRADE, callback, keys)
+        await self.subscribe_method(ROOM_ACCOUNT_TRADE, callback, keys=keys)
 
     async def add_token_trade_keys(self, keys: list = []):
-        """
-        Add keys to existing token trade subscription.
-        """
+        """Add keys to existing token trade subscription."""
         subscription = self._active_subscriptions.get(ROOM_TOKEN_TRADE, {})
         if subscription:
             self._subs_mints.extend(keys)
@@ -198,7 +219,7 @@ class PumpPortalWSClient(WebSocketClient):
             await self.subscribe_method(
                 ROOM_TOKEN_TRADE,
                 self._active_subscriptions[ROOM_TOKEN_TRADE]["callback"],
-                keys,
+                keys=keys,
             )
         else:
             self.logger.warning(
@@ -206,14 +227,12 @@ class PumpPortalWSClient(WebSocketClient):
             )
 
     async def remove_token_trade_keys(self, keys: list = []):
-        """
-        Remove keys from existing token trade subscription.
-        """
+        """Remove keys from existing token trade subscription."""
         subscription = self._active_subscriptions.get(ROOM_TOKEN_TRADE, {})
         if subscription:
             self._subs_mints = [k for k in self._subs_mints if k not in keys]
             self._active_subscriptions[ROOM_TOKEN_TRADE]["keys"] = self._subs_mints
-            await self.unsubscribe_method(f"un{ROOM_TOKEN_TRADE}", keys)
+            await self.unsubscribe_method(f"un{ROOM_TOKEN_TRADE}", keys=keys)
         else:
             self.logger.warning(
                 "No active token trade subscription found to update. Please subscribe first."
@@ -227,11 +246,10 @@ class PumpPortalWSClient(WebSocketClient):
             "callback": callback,
             "keys": self._subs_mints,
         }
-        await self.subscribe_method(ROOM_TOKEN_TRADE, callback, keys)
+        await self.subscribe_method(ROOM_TOKEN_TRADE, callback, keys=keys)
 
     async def unsubscribe_token_trade(self, keys: list = []) -> bool:
-        """
-        Unsubscribe from token trade updates.
+        """Unsubscribe from token trade updates.
 
         Leaves the token trade room to stop receiving token trade updates.
         Useful for managing subscriptions and reducing message volume.
@@ -255,14 +273,13 @@ class PumpPortalWSClient(WebSocketClient):
         await ws.unsubscribe_token_trade()
         ```
         """
-        if await self.unsubscribe_method(f"un{ROOM_TOKEN_TRADE}", keys):
+        if await self.unsubscribe_method(f"un{ROOM_TOKEN_TRADE}", keys=keys):
             self._subs_mints = [k for k in self._subs_mints if k not in keys]
             return True
         return False
 
     async def unsubscribe_account_trade(self, keys: list = []) -> bool:
-        """
-        Unsubscribe from account trade updates.
+        """Unsubscribe from account trade updates.
 
         Leaves the account trade room to stop receiving account trade updates.
         Useful for managing subscriptions and reducing message volume.
@@ -286,15 +303,13 @@ class PumpPortalWSClient(WebSocketClient):
         await ws.unsubscribe_account_trade()
         ```
         """
-        if await self.unsubscribe_method(f"un{ROOM_ACCOUNT_TRADE}", keys):
+        if await self.unsubscribe_method(f"un{ROOM_ACCOUNT_TRADE}", keys=keys):
             self._subs_accounts = [k for k in self._subs_accounts if k not in keys]
             return True
         return False
-        # Build room name
 
     async def unsubscribe_migration(self) -> bool:
-        """
-        Unsubscribe from migration updates.
+        """Unsubscribe from migration updates.
 
         Leaves the migrations room to stop receiving migration updates.
         Useful for managing subscriptions and reducing message volume.
@@ -319,11 +334,9 @@ class PumpPortalWSClient(WebSocketClient):
         ```
         """
         return await self.unsubscribe_method(ROOM_MIGRATION)
-        # Build room name
 
     async def unsubscribe_new_token(self) -> bool:
-        """
-        Unsubscribe from market cap updates for a specific token.
+        """Unsubscribe from market cap updates for a specific token.
 
         Leaves the token-specific room to stop receiving market cap updates.
         Useful for managing subscriptions and reducing message volume.
@@ -348,11 +361,6 @@ class PumpPortalWSClient(WebSocketClient):
         ```
         """
         return await self.unsubscribe_method(ROOM_NEW_TOKEN)
-
-    async def _send_notification(self, message: str) -> None:
-        show_alert(title="PumpPortal Notification", message=message)
-        if self._telegram_bot is not None:
-            await self._telegram_bot.send_message(message)
 
 
 pf_ws_client = PumpPortalWSClient()
