@@ -119,7 +119,7 @@ class WebSocketClient(ABC):
         self._is_reconnecting = False
         #
         # Store subscriptions for reconnection
-        self._active_subscriptions: dict[str, Any] = {}
+        self._active_subscriptions: dict[str, dict[str, Any]] = {}
 
         # Initialize Telegram bot if provided
         self._telegram_bot = effective_telegram_bot
@@ -370,17 +370,19 @@ class WebSocketClient(ABC):
 
     async def _connection_handler(self) -> None:
         """
-        Handle incoming WebSocket messages in continuous loop.
+        Handle incoming WebSocket messages in continuous loop with automatic reconnection.
 
         Receives messages from WebSocket, parses JSON, identifies the room/channel,
-        and routes to the appropriate callback function.
+        and routes to the appropriate callback function. Automatically reconnects
+        on connection errors.
 
         ## Process:
-        1. Loop over incoming messages asynchronously
-        2. Parse JSON message
+        1. Loop continuously (with reconnection support)
+        2. Receive and parse messages asynchronously
         3. Extract room identifier
         4. Match room to registered callback
         5. Execute callback with message data
+        6. On connection error, attempt reconnection
 
         ## Message Routing:
         - **new_pairs**: Direct room match
@@ -391,10 +393,11 @@ class WebSocketClient(ABC):
         - Catches JSON parsing errors (logs and continues)
         - Catches callback execution errors (logs and continues)
         - Handles WebSocket connection close gracefully
+        - Automatic reconnection with exponential backoff
         - Logs all errors with context for debugging
 
         ## Design Decisions:
-        - Runs in infinite loop until connection closes
+        - Uses while loop instead of recursion (prevents stack overflow)
         - Non-blocking: errors in one message don't stop processing
         - Flexible callback routing based on room naming patterns
         - Logs warnings for rooms without registered callbacks
@@ -402,7 +405,7 @@ class WebSocketClient(ABC):
         ## Side Effects:
         - Executes callbacks (may have their own side effects)
         - Logs message processing events
-        - Blocks until WebSocket connection closes
+        - Blocks until WebSocket connection closes without reconnection
 
         ## Example Message Flow:
         ```
@@ -417,66 +420,95 @@ class WebSocketClient(ABC):
             self.logger.error("Cannot handle messages: WebSocket not connected")
             return
 
-        try:
-            # Async iteration over WebSocket messages using aiohttp
-            async for msg in self.ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    try:
-                        print(msg)
-                        print(msg.data)
-                        await self._message_handler(msg.data)
+        # Main connection loop - handles reconnection without recursion
+        while True:
+            try:
+                # Async iteration over WebSocket messages using aiohttp
+                async for msg in self.ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        try:
+                            await self._message_handler(msg.data)
 
-                    except json.JSONDecodeError as e:
-                        self.logger.error(
-                            f"Failed to parse WebSocket message as JSON: {msg.data[:100]}..."
-                        )
-                        self.logger.debug(f"JSON decode error: {e}")
+                        except json.JSONDecodeError as e:
+                            self.logger.error(
+                                f"Failed to parse WebSocket message as JSON: {msg.data[:100]}..."
+                            )
+                            self.logger.debug(f"JSON decode error: {e}")
 
-                    except Exception as e:
-                        self.logger.error(
-                            f"Error handling WebSocket message: {e}", exc_info=True
-                        )
+                        except Exception as e:
+                            self.logger.error(
+                                f"Error handling WebSocket message: {e}", exc_info=True
+                            )
 
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    self.logger.error(f"WebSocket error: {self.ws.exception()}")
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        self.logger.error(f"WebSocket error: {self.ws.exception()}")
+                        break
+
+                    elif msg.type in (
+                        aiohttp.WSMsgType.CLOSE,
+                        aiohttp.WSMsgType.CLOSING,
+                        aiohttp.WSMsgType.CLOSED,
+                    ):
+                        self.logger.warning(f"WebSocket closing: {msg.type}")
+                        break
+
+                # Connection closed normally (broke out of async for loop)
+                self.logger.info(f"Connection ended. Close code: {self.ws.close_code}")
+
+                # If connection closed normally (e.g., server closed cleanly), exit loop
+                # Don't reconnect on clean close
+                if self.ws.close_code in (1000, 1001):  # Normal closure codes
+                    self.logger.info("Clean connection close - not reconnecting")
                     break
+                if self.ws.close_code in (1006, None):  # Abnormal closure or no code
+                    self.logger.warning(
+                        "Abnormal connection close - attempting reconnection"
+                    )
+                    await self._send_notification(
+                        f"⚠️ <b>WebSocket {self.__class__.__name__} Disconnected</b>\n"
+                        f"Connection: main\n"
+                        f"Close code: {self.ws.close_code}\n"
+                        f"Status: Attempting reconnection..."
+                    )
 
-                elif msg.type in (
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSING,
-                    aiohttp.WSMsgType.CLOSED,
-                ):
-                    self.logger.warning(f"WebSocket closing: {msg.type}")
-                    break
-            self.logger.warning(f"Connection ended. Close code: {self.ws.close_code}")
+                # Otherwise, treat as unexpected close and attempt reconnection
+                self.logger.warning(
+                    "Unexpected connection close - attempting reconnection"
+                )
 
-        except aiohttp.ClientError as e:
-            self.logger.warning(
-                f"⚠️ {self.__class__.__name__} WebSocket connection error: {e}"
-            )
+            except aiohttp.ClientError as e:
+                self.logger.warning(
+                    f"⚠️ {self.__class__.__name__} WebSocket connection error: {e}"
+                )
 
-            # Send Telegram notification about disconnection
-            await self._send_notification(
-                f"⚠️ <b>WebSocket {self.__class__.__name__} Disconnected</b>\n"
-                f"Connection: main\n"
-                f"Error: {str(e)}\n"
-                f"Status: Attempting reconnection..."
-            )
+                # Send Telegram notification about disconnection
+                await self._send_notification(
+                    f"⚠️ <b>WebSocket {self.__class__.__name__} Disconnected</b>\n"
+                    f"Connection: main\n"
+                    f"Error: {str(e)}\n"
+                    f"Status: Attempting reconnection..."
+                )
 
-            # Attempt to reconnect
+            except Exception as e:
+                self.logger.error(
+                    f"❌ WebSocket message handler error: {e}", exc_info=True
+                )
+                # On unexpected errors, also try to reconnect
+                await asyncio.sleep(1)  # Brief pause before reconnection
+
+            # Attempt to reconnect (common path for all disconnections)
             if await self._reconnect(connection_type="main"):
                 self.logger.info(
                     f"✅ {self.__class__.__name__} WebSocket reconnected, resuming message handling"
                 )
-                # Recursively restart handler after successful reconnection
-                await self._connection_handler()
+                # Continue the while loop to start processing messages again
+                continue
             else:
                 self.logger.error(
                     f"❌ Failed to reconnect {self.__class__.__name__} WebSocket"
                 )
-
-        except Exception as e:
-            self.logger.error(f"❌ WebSocket message handler error: {e}", exc_info=True)
+                # Exit the loop if reconnection fails
+                break
 
     async def subscribe_method(
         self,
@@ -587,7 +619,7 @@ class WebSocketClient(ABC):
             for attempt in range(1, self._max_reconnect_attempts + 1):
                 self.logger.info(
                     f"🔄 Reconnection attempt {attempt}/{self._max_reconnect_attempts} "
-                    f"for {connection_type} WebSocket..."
+                    f"for {self.__class__.__name__} WebSocket..."
                 )
 
                 # Wait with exponential backoff
@@ -628,13 +660,13 @@ class WebSocketClient(ABC):
                             )
 
                     self.logger.info(
-                        f"✅ Successfully reconnected {connection_type} WebSocket"
+                        f"✅ Successfully reconnected {self.__class__.__name__} WebSocket"
                     )
 
                     # Send Telegram notification about successful reconnection
                     await self._send_notification(
                         f"✅ <b>WebSocket {self.__class__.__name__} Reconnected</b>\n"
-                        f"Connection: {connection_type}\n"
+                        f"Connection: {self.__class__.__name__}\n"
                         f"Status: Successfully restored after {attempt} attempt(s)"
                     )
 
