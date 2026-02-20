@@ -1,8 +1,10 @@
-import websockets
 import asyncio
 import logging
 import json
+from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+import aiohttp
+from shared_lib.baseclient.aiohttp_client import BaseAioHttpClient
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
@@ -11,7 +13,7 @@ if TYPE_CHECKING:
 WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
 
 
-class WebSocketClient:
+class WebSocketClient(ABC):
     HEADERS = {}
 
     def __init__(
@@ -20,6 +22,7 @@ class WebSocketClient:
         log_level: Optional[int] = None,
         ws_url: str = WS_PRIMARY_URL,
         telegram_bot: Optional["TelegramBot"] = None,
+        client: Optional["BaseAioHttpClient"] = None,
     ) -> None:
         """
         Initialize WebSocket client with connection and notification settings.
@@ -121,6 +124,14 @@ class WebSocketClient:
         # Initialize Telegram bot if provided
         self._telegram_bot = effective_telegram_bot
 
+        # Store HTTP client or configuration for lazy initialization
+        self._http_client = client
+        self._http_client_config = {
+            "base_url": WS_PRIMARY_URL,
+        }
+        # Session will be created when first needed
+        self._session: Any = None
+
     async def start(self) -> None:
         """
         Start the WebSocket client and begin processing messages.
@@ -176,12 +187,11 @@ class WebSocketClient:
         Close all WebSocket connections gracefully.
 
         Sends close frame to servers and cleans up connection resources.
-        Closes both main WebSocket and Pulse WebSocket if connected.
+        Also closes the aiohttp session if it was created by this client.
 
         ## Side Effects:
         - Closes main WebSocket connection
-        - Closes Pulse WebSocket connection
-        - Sets self.ws and self.ws_pulse to None (implicitly via close)
+        - Closes aiohttp session if owned by this client
         - Logs closure events
         - Stops message handler loops
 
@@ -196,35 +206,44 @@ class WebSocketClient:
         # Close main WebSocket
         if self.ws:
             await self.ws.close()
-            self.logger.info("✅ Main WebSocket connection closed")
+            self.logger.info(f"✅ Main {self.__class__.__name__} connection closed")
+
+        # Close session if we created it (not provided by user)
+        if self._session is not None and self._http_client is None:
+            await self._session.close()
+            self._session = None
+            self.logger.debug("Closed aiohttp session")
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """Ensure aiohttp session is created (lazy initialization)."""
+        if self._session is None:
+            if self._http_client is not None:
+                # Use provided client's session
+                self._session = self._http_client.session
+            else:
+                # Create new session
+                self._session = aiohttp.ClientSession()
+                self.logger.debug("Created new aiohttp session for WebSocket")
+        return self._session
 
     async def connect(self) -> bool:
         """
-        Establish WebSocket connection to Axiom Trade server.
+        Establish WebSocket connection to server.
 
-        Validates authentication, constructs headers with tokens, and
-        establishes SSL/TLS WebSocket connection.
+        Uses aiohttp for WebSocket connections with support for custom headers
+        and proxy configuration.
 
         ## Process:
-        1. Validate authentication tokens are available
-        2. Retrieve access and refresh tokens from auth_manager
-        3. Build WebSocket headers with authentication cookies
-        4. Attempt connection to WebSocket server
-        5. Handle authentication errors (401) specifically
+        1. Ensure aiohttp session is initialized
+        2. Attempt WebSocket connection
+        3. Handle authentication and connection errors
 
         ## Returns:
         - `bool`: True if connection successful, False otherwise
 
-        ## Authentication:
-        - Uses cookies in WebSocket handshake headers
-        - Format: "auth-access-token=...; auth-refresh-token=..."
-        - Tokens must be valid and non-expired
-
         ## Headers:
-        - Origin: https://axiom.trade (required by server)
-        - Cookie: Authentication tokens
-        - User-Agent: Browser-like UA for compatibility
-        - Cache-Control, Pragma: Prevent caching
+        - Custom headers from self.HEADERS
+        - Supports authentication tokens in headers
 
         ## Error Handling:
         - Checks for HTTP 401 (authentication failure)
@@ -243,33 +262,111 @@ class WebSocketClient:
             print("Connection failed")
         ```
         """
-        HEADERS = {}
-
         try:
-            # Attempt WebSocket connection with authentication
+            # Ensure session exists
+            session = await self._ensure_session()
+
+            # Attempt WebSocket connection using aiohttp
             self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
-            self.ws = await websockets.connect(self.ws_url, additional_headers=HEADERS)
-            self.logger.info("✅ Connected to WebSocket server")
+            self.ws = await session.ws_connect(
+                self.ws_url,
+                headers=self.HEADERS,
+                # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
+                # heartbeat=30,
+            )
+            self.logger.info(f"✅ Connected to {self.ws_url} server")
+
             return True
 
-        except Exception as e:
-            # Check for authentication failure (HTTP 401)
-            if "HTTP 401" in str(e) or "401" in str(e):
+        except aiohttp.WSServerHandshakeError as e:
+            # Handle WebSocket handshake errors
+            if e.status == 401:
                 self.logger.error(
                     "❌ WebSocket authentication failed - invalid or missing tokens"
                 )
                 self.logger.error(
                     "Please check that your tokens are valid and not expired"
                 )
-                self.logger.error(f"Error details: {e}")
             else:
-                self.logger.error(f"❌ Failed to connect to WebSocket: {e}")
-
+                self.logger.error(
+                    f"❌ WebSocket handshake failed: status={e.status}, message={e.message}"
+                )
+            self.logger.error(f"Error details: {e}")
             return False
 
-    async def _message_handler(self, message: str) -> None: ...
+        except aiohttp.ClientError as e:
+            self.logger.error(f"❌ Failed to connect to WebSocket: {e}")
+            return False
 
-    async def _send_notification(self, message: str) -> None: ...
+        except Exception as e:
+            self.logger.error(f"❌ Unexpected error connecting to WebSocket: {e}")
+            return False
+
+    @abstractmethod
+    async def _message_handler(self, message: str) -> None:
+        """Parse and handle incoming WebSocket messages.
+
+        Subclasses must implement this to handle protocol-specific message formats.
+
+        ## Args:
+        - `message` (str): Raw message string from WebSocket
+        """
+        ...
+
+    @abstractmethod
+    async def _send_notification(self, message: str) -> None:
+        """Send notification to user via configured channels.
+
+        Subclasses must implement this to handle notifications.
+
+        ## Args:
+        - `message` (str): Notification message to send
+        """
+        ...
+
+    @abstractmethod
+    async def _build_subscribe_message(self, method: str, **kwargs) -> dict[str, Any]:
+        """Build protocol-specific subscription message.
+
+        Subclasses must implement this to build subscription messages
+        according to their WebSocket protocol.
+
+        ## Args:
+        - `method` (str): Subscription method/channel name
+        - `**kwargs`: Protocol-specific parameters (e.g., keys, params, etc.)
+
+        ## Returns:
+        - `dict`: Message dictionary to be JSON-serialized and sent
+
+        ## Examples:
+        ```python
+        # PumpPortal format
+        {"method": "subscribeNewToken", "keys": []}
+
+        # Solana RPC format
+        {"jsonrpc": "2.0", "id": 1, "method": "accountSubscribe", "params": [...]}
+
+        # Generic room-based format
+        {"action": "subscribe", "room": "trades", "filters": {...}}
+        ```
+        """
+        ...
+
+    @abstractmethod
+    async def _build_unsubscribe_message(self, method: str, **kwargs) -> dict[str, Any]:
+        """Build protocol-specific unsubscription message.
+
+        Subclasses must implement this to build unsubscription messages
+        according to their WebSocket protocol.
+
+        ## Args:
+        - `method` (str): Unsubscription method/channel name
+        - `**kwargs`: Protocol-specific parameters
+
+        ## Returns:
+        - `dict`: Message dictionary to be JSON-serialized and sent
+        """
+        ...
 
     async def _connection_handler(self) -> None:
         """
@@ -321,45 +418,62 @@ class WebSocketClient:
             return
 
         try:
-            # Async iteration over WebSocket messages
-            async for message in self.ws:
-                try:
-                    await self._message_handler(message)
+            # Async iteration over WebSocket messages using aiohttp
+            async for msg in self.ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    try:
+                        print(msg)
+                        print(msg.data)
+                        await self._message_handler(msg.data)
 
-                except json.JSONDecodeError as e:
-                    self.logger.error(
-                        f"Failed to parse WebSocket message as JSON: {message[:100]}..."
-                    )
-                    self.logger.debug(f"JSON decode error: {e}")
+                    except json.JSONDecodeError as e:
+                        self.logger.error(
+                            f"Failed to parse WebSocket message as JSON: {msg.data[:100]}..."
+                        )
+                        self.logger.debug(f"JSON decode error: {e}")
 
-                except Exception as e:
-                    self.logger.error(
-                        f"Error handling WebSocket message: {e}", exc_info=True
-                    )
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error handling WebSocket message: {e}", exc_info=True
+                        )
 
-        except websockets.exceptions.ConnectionClosed as e:
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    self.logger.error(f"WebSocket error: {self.ws.exception()}")
+                    break
+
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.CLOSED,
+                ):
+                    self.logger.warning(f"WebSocket closing: {msg.type}")
+                    break
+            self.logger.warning(f"Connection ended. Close code: {self.ws.close_code}")
+
+        except aiohttp.ClientError as e:
             self.logger.warning(
-                f"⚠️ WebSocket connection closed: code={e.code} reason={e.reason}"
+                f"⚠️ {self.__class__.__name__} WebSocket connection error: {e}"
             )
 
             # Send Telegram notification about disconnection
             await self._send_notification(
                 f"⚠️ <b>WebSocket {self.__class__.__name__} Disconnected</b>\n"
                 f"Connection: main\n"
-                f"Code: {e.code}\n"
-                f"Reason: {e.reason or 'Unknown'}\n"
+                f"Error: {str(e)}\n"
                 f"Status: Attempting reconnection..."
             )
 
             # Attempt to reconnect
             if await self._reconnect(connection_type="main"):
                 self.logger.info(
-                    "✅ Main WebSocket reconnected, resuming message handling"
+                    f"✅ {self.__class__.__name__} WebSocket reconnected, resuming message handling"
                 )
                 # Recursively restart handler after successful reconnection
                 await self._connection_handler()
             else:
-                self.logger.error("❌ Failed to reconnect main WebSocket")
+                self.logger.error(
+                    f"❌ Failed to reconnect {self.__class__.__name__} WebSocket"
+                )
 
         except Exception as e:
             self.logger.error(f"❌ WebSocket message handler error: {e}", exc_info=True)
@@ -368,57 +482,79 @@ class WebSocketClient:
         self,
         method: str,
         callback: Callable[[dict[str, Any]], Awaitable[None]],
-        keys: list = [],
-    ):
+        **kwargs,
+    ) -> bool:
+        """Generic subscription method that uses protocol-specific message builder.
+
+        ## Args:
+        - `method` (str): Subscription method/channel name
+        - `callback` (Callable): Async callback function to handle messages
+        - `**kwargs`: Protocol-specific parameters passed to _build_subscribe_message
+
+        ## Returns:
+        - `bool`: True if subscription successful, False otherwise
+        """
         if not self.ws:
             if not await self.connect():
                 return False
-        # Register callback for migrations room
+        # Register callback
         self._callbacks[method] = callback
         try:
-            # Send join message to server
-            await self._send_message(method, keys)
-            self.logger.info(f"✅ Subscribed to {method} monitor with keys: {keys}")
+            # Build protocol-specific message
+            message = await self._build_subscribe_message(method, **kwargs)
+            # Send JSON message to server
+            await self._send_json_message(message)
+            keys_info = (
+                f" with keys: {kwargs.get('keys', [])}" if "keys" in kwargs else ""
+            )
+            self.logger.info(f"✅ Subscribed to {method}{keys_info}")
             return True
         except Exception as e:
-            self.logger.error(f"❌ Failed to subscribe to {method} monitor: {e}")
+            self.logger.error(f"❌ Failed to subscribe to {method}: {e}")
             return False
 
-    async def unsubscribe_method(self, method: str, keys: list = []) -> bool:
-        # Build room name
-        room_name = method
+    async def unsubscribe_method(self, method: str, **kwargs) -> bool:
+        """Generic unsubscription method that uses protocol-specific message builder.
 
+        ## Args:
+        - `method` (str): Unsubscription method/channel name
+        - `**kwargs`: Protocol-specific parameters passed to _build_unsubscribe_message
+
+        ## Returns:
+        - `bool`: True if unsubscription successful, False otherwise
+        """
         # Remove callback from registry
-        callback_key = method
-        self._callbacks.pop(callback_key, None)
+        self._callbacks.pop(method, None)
 
         try:
-            # Send leave message to server
-            await self._send_message(room_name, keys)
-            self.logger.info(f"✅ Unsubscribed {keys} from {method} updates")
+            # Build protocol-specific message
+            message = await self._build_unsubscribe_message(method, **kwargs)
+            # Send JSON message to server
+            await self._send_json_message(message)
+            keys_info = f" {kwargs.get('keys', [])}" if "keys" in kwargs else ""
+            self.logger.info(f"✅ Unsubscribed{keys_info} from {method} updates")
             return True
 
         except Exception as e:
             self.logger.error(f"❌ Failed to unsubscribe from {method} updates: {e}")
             return False
 
-    async def _send_message(self, method: str, keys: list = []) -> None:
-        """
-        Send join message to WebSocket server.
+    async def _send_json_message(self, message: dict[str, Any]) -> None:
+        """Send JSON message to WebSocket server.
+
+        Generic method to send any message dictionary as JSON to the WebSocket.
+        Used by subscribe/unsubscribe methods after building protocol-specific messages.
 
         ## Args:
-        - `room` (str): Room name to join
+        - `message` (dict): Message dictionary to JSON-serialize and send
 
-        ## Message Format:
-        ```json
-        {"action": "join", "room": "room_name"}
-        ```
+        ## Raises:
+        - `RuntimeError`: If WebSocket is not connected
         """
         if not self.ws:
             raise RuntimeError("WebSocket not connected")
 
-        message = json.dumps({"method": method, "keys": keys})
-        await self.ws.send(message)
+        await self.ws.send_json(message)
 
     async def _reconnect(self, connection_type: str = "main") -> bool:
         """
@@ -476,7 +612,15 @@ class WebSocketClient:
                     self.logger.info("Restoring subscriptions...")
                     for room, sub_info in self._active_subscriptions.items():
                         try:
-                            await self._send_message(room, sub_info.get("keys", []))
+                            # Build subscription message using protocol-specific builder
+                            # Extract kwargs from sub_info (excluding callback)
+                            kwargs = {
+                                k: v for k, v in sub_info.items() if k != "callback"
+                            }
+                            message = await self._build_subscribe_message(
+                                room, **kwargs
+                            )
+                            await self._send_json_message(message)
                             self.logger.info(f"✅ Restored subscription: {room}")
                         except Exception as e:
                             self.logger.error(

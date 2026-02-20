@@ -126,9 +126,9 @@ class BaseAioHttpClient(ABC):
                 logger.warning(
                     "TLS fingerprinting requested but 'connector' already provided in kwargs"
                 )
-        elif connector is None:
-            # Use default connector if none provided
-            connector = TCPConnector()
+        # elif connector is None:
+        #     # Use default connector if none provided
+        #     connector = TCPConnector()
 
         # Set default headers
         default_headers = {
