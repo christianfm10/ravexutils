@@ -162,7 +162,7 @@ class BaseAioHttpClient(ABC):
         payload: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> aiohttp.ClientResponse:
         """
         Perform an HTTP request and return JSON response.
 
@@ -195,6 +195,7 @@ class BaseAioHttpClient(ABC):
             kwargs["proxy"] = self._proxy_url
 
         try:
+            self.session.headers.update(**{**self.session.headers, **(headers or {})})
             logger.debug(f"{method} {url}")
             async with self.session.request(
                 method,
@@ -206,9 +207,11 @@ class BaseAioHttpClient(ABC):
             ) as response:
                 # Raise for status codes >= 400
                 response.raise_for_status()
+                await response.read()
 
                 logger.debug(f"Response status: {response.status}")
-                return await response.json()
+
+                return response
 
         except aiohttp.ClientProxyConnectionError as e:
             logger.error(f"Proxy error: {e}")
@@ -237,6 +240,46 @@ class BaseAioHttpClient(ABC):
             logger.error(f"Unexpected error: {e}")
             raise HTTPError(f"Request failed: {e}") from e
 
+    async def fetch_json(
+        self,
+        method: str,
+        endpoint: str = "",
+        params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Alias for _fetch to emphasize JSON response.
+
+        This method is identical to _fetch and is provided as an alias
+        for clarity when the expected response is JSON.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE, PATCH, etc.).
+            endpoint: API endpoint path (will be appended to BASE_URL).
+            params: Query parameters for the request.
+            payload: JSON payload for POST/PUT/PATCH requests.
+            headers: Additional headers for this specific request.
+            **kwargs: Additional arguments passed to aiohttp request method.
+
+        Returns:
+            Parsed JSON response.
+        """
+        try:
+            result = await self._fetch(
+                method,
+                endpoint,
+                params=params,
+                payload=payload,
+                headers=headers,
+                **kwargs,
+            )
+            return await result.json()
+        except aiohttp.ContentTypeError as e:
+            logger.error(f"Failed to parse JSON response: {e}")
+            raise HTTPError(f"Invalid JSON response: {e}") from e
+
     async def _get(
         self,
         endpoint: str,
@@ -254,7 +297,8 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        return await self._fetch("GET", endpoint, params=params, **kwargs)
+        response = await self.fetch_json("GET", endpoint, params=params, **kwargs)
+        return response
 
     async def _post(
         self,
@@ -273,7 +317,8 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        return await self._fetch("POST", endpoint, payload=payload, **kwargs)
+        response = await self.fetch_json("POST", endpoint, payload=payload, **kwargs)
+        return response
 
     async def _put(
         self,
@@ -292,7 +337,8 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        return await self._fetch("PUT", endpoint, payload=payload, **kwargs)
+        response = await self.fetch_json("PUT", endpoint, payload=payload, **kwargs)
+        return response
 
     async def _delete(
         self,
@@ -309,7 +355,8 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        return await self._fetch("DELETE", endpoint, **kwargs)
+        response = await self.fetch_json("DELETE", endpoint, **kwargs)
+        return response
 
     async def _check_ip(self) -> dict[str, str]:
         """
