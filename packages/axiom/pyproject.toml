@@ -10,6 +10,7 @@ dependencies = [
     "httpx",
     "imapclient>=3.0.1",
     "cryptography>=46.0.3",
+    "msgpack>=1.1.2",
 ]
 
 [project.scripts]
