@@ -208,35 +208,41 @@ For async operations, use the WebSocket client methods with proper asyncio handl
 import logging
 from typing import Any, Dict, Optional
 
-import httpx
-
 # from axiom.websocket._client import AxiomWebSocketClient
+from shared_lib.baseclient.aiohttp_client import BaseAioHttpClient
+from yarl import URL
 from .auth.auth_manager import AuthManager
 
 # API endpoint constants
-API_BASE_URL_V6 = "https://api6.axiom.trade"
-API_BASE_URL_V10 = "https://api10.axiom.trade"
+API_BASE_URL_V6 = "https://api8.axiom.trade"
+API_BASE_URL_V10 = "https://api8.axiom.trade"
 
 # HTTP headers for API requests
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 )
+# DEFAULT_HEADERS = (
+#     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:136.0) Gecko/20100101 Firefox/136.0",
+# )
 DEFAULT_HEADERS = {
-    "User-Agent": DEFAULT_USER_AGENT,
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Origin": "https://axiom.trade",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Content-Type": "application/json",
     "Connection": "keep-alive",
+    "Host": "api8.axiom.trade",
+    "Origin": "https://axiom.trade",
     "Referer": "https://axiom.trade/",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-site",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+    "TE": "trailers",
+    "User-Agent": DEFAULT_USER_AGENT,
 }
 
 
-class AxiomClient:
+class AxiomClient(BaseAioHttpClient):
     """# Axiom Trade Client
 
     Main client for interacting with Axiom Trade API and WebSocket streams.
@@ -293,6 +299,8 @@ class AxiomClient:
         storage_dir: Optional[str] = None,
         use_saved_tokens: bool = True,
         log_level: int = logging.INFO,
+        use_tls_finger_print: bool = True,
+        **kwargs: Any,
     ) -> None:
         """## Initialize Axiom Trade Client
 
@@ -356,6 +364,14 @@ class AxiomClient:
         )
         ```
         """
+        # Initialize base HTTP client
+        super().__init__(
+            base_url=API_BASE_URL_V6,
+            headers=DEFAULT_HEADERS,
+            use_tls_fingerprint=use_tls_finger_print,
+            **kwargs,
+        )
+
         # Initialize authentication manager
         self.auth_manager = AuthManager(
             username=username,
@@ -368,6 +384,7 @@ class AxiomClient:
 
         # Backward compatibility alias
         self.auth = self.auth_manager
+        self.session.cookie_jar.update_cookies(self.auth_manager.get_refresh_cookies())
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -427,7 +444,7 @@ class AxiomClient:
             self.auth_manager.tokens.refresh_token if self.auth_manager.tokens else None
         )
 
-    def login(
+    async def login(
         self, email: Optional[str] = None, password: Optional[str] = None
     ) -> Dict[str, Any]:
         """## Login to Axiom Trade
@@ -624,7 +641,48 @@ class AxiomClient:
             self.logger.warning("Failed to refresh access token")
         return success
 
-    def ensure_authenticated(self) -> bool:
+    async def refresh_tokens(self):
+        """## Async Token Refresh
+
+        Asynchronous version of token refresh method. Useful for refreshing tokens in
+        async contexts without blocking the event loop.
+
+        ### Returns
+
+        - `bool`: True if refresh was successful, False otherwise
+
+        """
+        if not self.auth_manager.tokens or not self.auth_manager.tokens.refresh_token:
+            self.logger.error("No refresh token available for token refresh")
+            return False
+
+        try:
+            self.logger.info("Refreshing authentication tokens...")
+
+            await self.load()
+            # API endpoint for token refresh
+            endpoint = "/refresh-access-token"
+            response = await super()._fetch(
+                "POST",
+                endpoint,
+            )
+            await self.save(cookiess=self.session.cookie_jar)
+
+            if self.auth_manager.process_refresh_response({}, response.cookies):
+                self.logger.info("✅ Tokens refreshed successfully")
+                return True
+            else:
+                self.logger.error(
+                    f"❌ Token refresh failed - Status: {response.status}, "
+                    f"Response: {await response.text()}"
+                )
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ Token refresh unexpected error: {e}", exc_info=True)
+            return False
+
+    async def ensure_authenticated(self) -> bool:
         """## Ensure Valid Authentication
 
         Ensure the client has valid authentication tokens. Automatically refreshes
@@ -652,7 +710,28 @@ class AxiomClient:
         token_info = client.get_token_info("token_address")  # Auto-authenticates
         ```
         """
-        return self.auth_manager.ensure_valid_authentication()
+        if not self.auth_manager.tokens:
+            if self.auth_manager.username and self.auth_manager.password:
+                result = await self.login()
+                return result["success"]
+            return False
+
+        # Tokens valid
+        if not self.auth_manager.tokens.is_expired:
+            return True
+
+        # Try refresh
+        if await self.refresh_tokens():
+            self.logger.info("Refreshing expired tokens...")
+            return True
+
+        # Refresh failed - try re-authentication
+        if self.auth_manager.username and self.auth_manager.password:
+            self.logger.info("Refresh failed, attempting re-authentication")
+            result = await self.login()
+            return result["success"]
+
+        return False
 
     def logout(self) -> None:
         """## Logout
@@ -769,7 +848,38 @@ class AxiomClient:
         """
         return self.auth_manager.get_token_info()
 
-    def get_token_info(self, token_address: str) -> Dict[str, Any]:
+    async def _fetch(
+        self,
+        method: str,
+        endpoint: str = "",
+        params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ):
+        """Override _fetch to add authentication headers automatically."""
+        # Ensure valid authentication
+        if not await self.ensure_authenticated():
+            raise ValueError(
+                "Authentication failed. Please login first or check your credentials."
+            )
+
+        # await self.save()
+        # Get authenticated headers and merge with any provided headers
+        # auth_headers = self.auth_manager.get_authenticated_headers(headers or {})
+
+        # Call parent _fetch with authenticated headers
+        print("Cookies :", self.session.cookie_jar.filter_cookies(URL(self.base_url)))
+        return await super()._fetch(
+            method=method,
+            endpoint=endpoint,
+            params=params,
+            payload=payload,
+            headers=headers,
+            **kwargs,
+        )
+
+    async def get_token_info(self, token_address: str) -> Dict[str, Any]:
         """## Get Token Information
 
         Retrieve detailed information about a specific token by its address.
@@ -792,749 +902,116 @@ class AxiomClient:
 
         ```python
         client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
+        await client.login()
 
         # Get token info by address
-        token_info = client.get_token_info("0x1234567890abcdef...")
+        token_info = await client.get_token_info("0x1234567890abcdef...")
         print(f"Token name: {token_info['name']}")
         print(f"Token symbol: {token_info['symbol']}")
         print(f"Market cap: {token_info['marketCap']}")
         ```
         """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting token info")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V6}/token/{token_address}"
         self.logger.debug("Getting token info for %s", token_address)
 
         try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting token info: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get token info (HTTP {e.response.status_code}): {e}"
-            ) from e
+            return await self._get(f"/token/{token_address}")
         except Exception as e:
             self.logger.error("Error getting token info: %s", e)
             raise Exception(f"Failed to get token info: {e}") from e
 
-    def get_user_portfolio(self) -> Dict[str, Any]:
-        """## Get User Portfolio
-
-        Retrieve the authenticated user's portfolio information including holdings,
-        positions, and balances.
-
-        ### Returns
-
-        - `Dict[str, Any]`: Portfolio information from the API
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get portfolio
-        portfolio = client.get_user_portfolio()
-        print(f"Total value: ${portfolio['totalValue']}")
-        print(f"Holdings: {len(portfolio['holdings'])} tokens")
-
-        for holding in portfolio['holdings']:
-            print(f"- {holding['symbol']}: {holding['amount']} tokens")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting portfolio")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V6}/portfolio"
-        self.logger.debug("Getting user portfolio")
-
+    async def get_dev_tokens(self, dev_address: str) -> dict[str, Any]:
+        self.logger.debug("Getting developer tokens for %s", dev_address)
         try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting portfolio: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get portfolio (HTTP {e.response.status_code}): {e}"
-            ) from e
+            params = {"devAddress": dev_address, "v": 1771633387195}
+            return await self._get("/dev-tokens-v3", params=params)
         except Exception as e:
-            self.logger.error("Error getting portfolio: %s", e)
-            raise Exception(f"Failed to get portfolio: {e}") from e
+            self.logger.error("Error getting token info: %s", e)
+            raise Exception(f"Failed to get token info: {e}") from e
 
-    def get_token_info_by_pair(self, pair_address: str) -> Dict[str, Any]:
-        """## Get Token Information by Pair Address
-
-        Retrieve token information using a trading pair address instead of token address.
-        Useful when working with DEX pairs.
-
-        ### Parameters
-
-        - `pair_address` (str): The blockchain address of the trading pair
-
-        ### Returns
-
-        - `Dict[str, Any]`: Token information from the API
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get token info by pair address
-        pair_info = client.get_token_info_by_pair("0xabcdef1234567890...")
-        print(f"Token: {pair_info['token']['symbol']}")
-        print(f"Pair: {pair_info['pair']['name']}")
-        print(f"Liquidity: ${pair_info['liquidity']}")
-        print(f"Volume 24h: ${pair_info['volume24h']}")
-        ```
+    async def save(self, file: str = "session.dat", pattern: str = ".*", cookiess=None):
         """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting token info by pair")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
+        save all cookies (or a subset, controlled by `pattern`) to a file to be restored later
 
-        url = f"{API_BASE_URL_V10}/token-info?pairAddress={pair_address}"
-        self.logger.debug("Getting token info for pair %s", pair_address)
+        :param file:
+        :type file:
+        :param pattern: regex style pattern string.
+               any cookie that has a  domain, key or value field which matches the pattern will be included.
+               default = ".*"  (all)
 
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting token info by pair: %s - %s",
-                e.response.status_code,
-                e,
-            )
-            raise Exception(
-                f"Failed to get token info by pair (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting token info by pair: %s", e)
-            raise Exception(f"Failed to get token info by pair: {e}") from e
-
-    def get_trending_tokens(self, time_period: str = "1h") -> Dict[str, Any]:
-        """## Get Trending Meme Tokens
-
-        Retrieve the most trending meme tokens for a specified time period.
-        Returns tokens sorted by popularity, volume, or other trending metrics.
-
-        ### Parameters
-
-        - `time_period` (str): Time period for trending calculation. Valid values:
-            - `"1h"`: Last 1 hour (default)
-            - `"24h"`: Last 24 hours
-            - `"7d"`: Last 7 days
-
-        ### Returns
-
-        - `Dict[str, Any]`: Trending tokens information from the API
-
-        ### Raises
-
-        - `ValueError`: If authentication fails or invalid time_period provided
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get trending tokens for last hour
-        trending_1h = client.get_trending_tokens(time_period="1h")
-        print(f"Top trending token: {trending_1h[0]['symbol']}")
-
-        # Get trending tokens for last 24 hours
-        trending_24h = client.get_trending_tokens(time_period="24h")
-        for token in trending_24h[:10]:
-            print(f"{token['symbol']}: Volume ${token['volume']}")
-
-        # Get trending tokens for last 7 days
-        trending_7d = client.get_trending_tokens(time_period="7d")
-        ```
+               eg: the pattern "(cf|.com|nowsecure)" will include those cookies which:
+                    - have a string "cf" (cloudflare)
+                    - have ".com" in them, in either domain, key or value field.
+                    - contain "nowsecure"
+        :type pattern: str
+        :return:
+        :rtype:
         """
-        # Validate time period
-        valid_periods = ["1h", "24h", "7d"]
-        if time_period not in valid_periods:
-            raise ValueError(
-                f"Invalid time_period '{time_period}'. "
-                f"Must be one of: {', '.join(valid_periods)}"
-            )
+        import re
 
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting trending tokens")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
+        import pathlib
+        import pickle
 
-        url = f"{API_BASE_URL_V6}/meme-trending?timePeriod={time_period}"
-        self.logger.debug("Getting trending tokens for period: %s", time_period)
+        re_pattern: re.Pattern = re.compile(pattern)
+        save_path = pathlib.Path(file).resolve()
 
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting trending tokens: %s - %s",
-                e.response.status_code,
-                e,
-            )
-            raise Exception(
-                f"Failed to get trending tokens (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting trending tokens: %s", e)
-            raise Exception(f"Failed to get trending tokens: {e}") from e
+        # cookies = await self.session.cookie_jar.get_all(requests_cookie_format=False)
+        cookies = self.session.cookie_jar
+        cookies.clear(lambda cookie: cookie["domain"] == "")
+        print("Cookies::", cookies)
+        # print(cookies.keys())
+        # print(cookies.values())
 
-    def get_last_transaction(self, pair_address: str) -> Dict[str, Any]:
-        """## Get Last Transaction for Pair
+        included_cookies = []
+        for cookie in cookies:
+            # for match in re_pattern.finditer(str(cookie.__dict__)):
+            # self.logger.debug(
+            #     "saved cookie for matching pattern '%s' => (%s: %s)",
+            #     re_pattern.pattern,
+            #     cookie.name,
+            #     cookie.value,
+            # )
+            print("Cookie :", cookie.keys())
+            print("Cookie :", cookie.values())
+            print("Cookie :", cookie)
+            included_cookies.append(cookie)
+            # break
+        pickle.dump(included_cookies, save_path.open("w+b"))
 
-        Retrieve the most recent transaction for a specific trading pair.
-        Useful for monitoring real-time trading activity.
-
-        ### Parameters
-
-        - `pair_address` (str): The blockchain address of the trading pair
-
-        ### Returns
-
-        - `Dict[str, Any]`: Last transaction information containing:
-            - Transaction hash, timestamp, type (buy/sell)
-            - Amount, price, sender/receiver addresses
-            - Other transaction-specific data
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get last transaction for a pair
-        last_tx = client.get_last_transaction("0xabcdef1234567890...")
-        print(f"Type: {last_tx['type']}")
-        print(f"Amount: {last_tx['amount']} tokens")
-        print(f"Price: ${last_tx['price']}")
-        print(f"Time: {last_tx['timestamp']}")
-        print(f"Hash: {last_tx['hash']}")
-        ```
+    async def load(self, file: str = "session.dat", pattern: str = ".*"):
         """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting last transaction")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
+        load all cookies (or a subset, controlled by `pattern`) from a file created by :py:meth:`~save_cookies`.
 
-        url = f"{API_BASE_URL_V10}/last-transaction?pairAddress={pair_address}"
-        self.logger.debug("Getting last transaction for pair %s", pair_address)
+        :param file:
+        :type file:
+        :param pattern: regex style pattern string.
+               any cookie that has a  domain, key or value field which matches the pattern will be included.
+               default = ".*"  (all)
 
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting last transaction: %s - %s",
-                e.response.status_code,
-                e,
-            )
-            raise Exception(
-                f"Failed to get last transaction (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting last transaction: %s", e)
-            raise Exception(f"Failed to get last transaction: {e}") from e
-
-    def get_pair_info(self, pair_address: str) -> Dict[str, Any]:
-        """## Get Trading Pair Information
-
-        Retrieve comprehensive information about a specific trading pair including
-        token details, liquidity, reserves, and metadata.
-
-        ### Parameters
-
-        - `pair_address` (str): The blockchain address of the trading pair
-
-        ### Returns
-
-        - `Dict[str, Any]`: Pair information containing:
-            - Token addresses and symbols
-            - Reserve amounts for both tokens
-            - Total liquidity value
-            - Creation date and DEX information
-            - Other pair-specific metadata
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get pair information
-        pair_info = client.get_pair_info("0xabcdef1234567890...")
-        print(f"Pair: {pair_info['token0']['symbol']}/{pair_info['token1']['symbol']}")
-        print(f"Liquidity: ${pair_info['liquidityUSD']}")
-        print(f"Reserve0: {pair_info['reserve0']}")
-        print(f"Reserve1: {pair_info['reserve1']}")
-        print(f"DEX: {pair_info['dex']}")
-        ```
+               eg: the pattern "(cf|.com|nowsecure)" will include those cookies which:
+                    - have a string "cf" (cloudflare)
+                    - have ".com" in them, in either domain, key or value field.
+                    - contain "nowsecure"
+        :type pattern: str
+        :return:
+        :rtype:
         """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting pair info")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V10}/pair-info?pairAddress={pair_address}"
-        self.logger.debug("Getting pair info for %s", pair_address)
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting pair info: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get pair info (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting pair info: %s", e)
-            raise Exception(f"Failed to get pair info: {e}") from e
-
-    def get_pair_stats(self, pair_address: str) -> Dict[str, Any]:
-        """## Get Trading Pair Statistics
-
-        Retrieve statistical data and trading metrics for a specific trading pair.
-        Includes volume, price changes, transaction counts, and other analytics.
-
-        ### Parameters
-
-        - `pair_address` (str): The blockchain address of the trading pair
-
-        ### Returns
-
-        - `Dict[str, Any]`: Pair statistics containing:
-            - Trading volume (24h, 7d, etc.)
-            - Price changes and percentage moves
-            - Transaction counts (buys, sells, total)
-            - High/low prices for various timeframes
-            - Other statistical metrics
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get pair statistics
-        stats = client.get_pair_stats("0xabcdef1234567890...")
-        print(f"24h Volume: ${stats['volume24h']}")
-        print(f"Price Change 24h: {stats['priceChange24h']}%")
-        print(f"Transactions 24h: {stats['txCount24h']}")
-        print(f"24h High: ${stats['high24h']}")
-        print(f"24h Low: ${stats['low24h']}")
-        print(f"Current Price: ${stats['currentPrice']}")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting pair stats")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V10}/pair-stats?pairAddress={pair_address}"
-        self.logger.debug("Getting pair stats for %s", pair_address)
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting pair stats: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get pair stats (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting pair stats: %s", e)
-            raise Exception(f"Failed to get pair stats: {e}") from e
-
-    def get_meme_open_positions(self, wallet_address: str) -> Dict[str, Any]:
-        """## Get Open Meme Token Positions
-
-        Retrieve all currently open (non-closed) meme token positions for a specific wallet.
-        Useful for tracking active holdings and calculating portfolio value.
-
-        ### Parameters
-
-        - `wallet_address` (str): The blockchain wallet address to query
-
-        ### Returns
-
-        - `Dict[str, Any]`: Open positions information containing:
-            - List of open positions with token details
-            - Entry prices, current prices, and P&L
-            - Position sizes and values
-            - Token metadata for each position
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get open positions for a wallet
-        positions = client.get_meme_open_positions("0x1234567890abcdef...")
-
-        print(f"Total positions: {len(positions['positions'])}")
-        print(f"Total value: ${positions['totalValue']}")
-
-        for position in positions['positions']:
-            print(f"\nToken: {position['symbol']}")
-            print(f"Amount: {position['amount']}")
-            print(f"Entry: ${position['entryPrice']}")
-            print(f"Current: ${position['currentPrice']}")
-            print(f"P&L: {position['profitLoss']}%")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting open positions")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V10}/meme-open-positions?walletAddress={wallet_address}"
-        self.logger.debug("Getting open positions for wallet %s", wallet_address)
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting open positions: %s - %s",
-                e.response.status_code,
-                e,
-            )
-            raise Exception(
-                f"Failed to get open positions (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting open positions: %s", e)
-            raise Exception(f"Failed to get open positions: {e}") from e
-
-    def get_holder_data(
-        self, pair_address: str, only_tracked_wallets: bool = False
-    ) -> Dict[str, Any]:
-        """## Get Token Holder Data
-
-        Retrieve detailed information about token holders for a specific trading pair.
-        Includes holder addresses, balances, percentages, and optional tracking data.
-
-        ### Parameters
-
-        - `pair_address` (str): The blockchain address of the trading pair
-
-        - `only_tracked_wallets` (bool): If True, only return data for wallets that are
-          being tracked/monitored by the platform (e.g., notable traders, whales).
-          If False (default), return all holders.
-
-        ### Returns
-
-        - `Dict[str, Any]`: Holder data information containing:
-            - List of holder addresses with balances
-            - Percentage ownership for each holder
-            - Total holder count
-            - Distribution metrics (concentration, etc.)
-            - Tracked wallet flags and metadata
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get all holder data
-        all_holders = client.get_holder_data("0xabcdef1234567890...")
-        print(f"Total holders: {all_holders['totalHolders']}")
-        print(f"Top 10 hold: {all_holders['top10Percentage']}%")
-
-        # Get only tracked wallets (whales, notable traders)
-        tracked = client.get_holder_data(
-            pair_address="0xabcdef1234567890...",
-            only_tracked_wallets=True
-        )
-
-        for holder in tracked['holders'][:5]:
-            print(f"\nWallet: {holder['address']}")
-            print(f"Balance: {holder['balance']} tokens")
-            print(f"Percentage: {holder['percentage']}%")
-            print(f"Tracked: {holder['isTracked']}")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting holder data")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = (
-            f"{API_BASE_URL_V10}/holder-data-v3?pairAddress={pair_address}"
-            f"&onlyTrackedWallets={str(only_tracked_wallets).lower()}"
-        )
-        self.logger.debug(
-            "Getting holder data for pair %s (tracked only: %s)",
-            pair_address,
-            only_tracked_wallets,
-        )
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting holder data: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get holder data (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting holder data: %s", e)
-            raise Exception(f"Failed to get holder data: {e}") from e
-
-    def get_dev_tokens(self, dev_address: str) -> Dict[str, Any]:
-        """## Get Developer's Created Tokens
-
-        Retrieve all tokens created by a specific developer/deployer address.
-        Useful for analyzing developer track record and finding related tokens.
-
-        ### Parameters
-
-        - `dev_address` (str): The blockchain address of the token developer/deployer
-
-        ### Returns
-
-        - `Dict[str, Any]`: Developer tokens information containing:
-            - List of all tokens created by this developer
-            - Token metadata (name, symbol, address)
-            - Performance metrics for each token
-            - Creation dates and deployment details
-            - Overall developer statistics
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Get all tokens by a developer
-        dev_tokens = client.get_dev_tokens("0x9876543210fedcba...")
-
-        print(f"Developer: {dev_tokens['developerAddress']}")
-        print(f"Total tokens created: {len(dev_tokens['tokens'])}")
-        print(f"Success rate: {dev_tokens['successRate']}%")
-
-        for token in dev_tokens['tokens']:
-            print(f"\nToken: {token['symbol']} ({token['name']})")
-            print(f"Address: {token['address']}")
-            print(f"Created: {token['createdAt']}")
-            print(f"ATH Market Cap: ${token['athMarketCap']}")
-            print(f"Current Status: {token['status']}")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting dev tokens")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = f"{API_BASE_URL_V10}/dev-tokens-v2?devAddress={dev_address}"
-        self.logger.debug("Getting tokens for developer %s", dev_address)
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting dev tokens: %s - %s", e.response.status_code, e
-            )
-            raise Exception(
-                f"Failed to get dev tokens (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting dev tokens: %s", e)
-            raise Exception(f"Failed to get dev tokens: {e}") from e
-
-    def get_token_analysis(self, dev_address: str, token_ticker: str) -> Dict[str, Any]:
-        """## Get Token Analysis
-
-        Retrieve comprehensive analysis for a specific token created by a developer.
-        Combines developer history with token-specific metrics for detailed insights.
-
-        ### Parameters
-
-        - `dev_address` (str): The blockchain address of the token developer/deployer
-
-        - `token_ticker` (str): The ticker symbol of the token to analyze (e.g., "PEPE")
-
-        ### Returns
-
-        - `Dict[str, Any]`: Token analysis information containing:
-            - Detailed token metrics and performance data
-            - Developer track record and patterns
-            - Risk assessment and scoring
-            - Holder distribution analysis
-            - Liquidity and volume metrics
-            - Historical performance comparison
-            - Red flags and positive indicators
-
-        ### Raises
-
-        - `ValueError`: If authentication fails
-        - `httpx.HTTPStatusError`: If the API request fails
-        - `Exception`: For other errors during the request
-
-        ### Example
-
-        ```python
-        client = AxiomTradeClient(username="user@example.com", password="password")
-        client.login()
-
-        # Analyze a specific token by developer and ticker
-        analysis = client.get_token_analysis(
-            dev_address="0x9876543210fedcba...",
-            token_ticker="PEPE"
-        )
-
-        print(f"Token: {analysis['token']['name']} ({analysis['token']['ticker']})")
-        print(f"Risk Score: {analysis['riskScore']}/100")
-        print(f"Liquidity: ${analysis['liquidity']}")
-        print(f"Holder Count: {analysis['holderCount']}")
-        print(f"Dev Success Rate: {analysis['developer']['successRate']}%")
-
-        # Check for red flags
-        if analysis['redFlags']:
-            print("\n⚠️ Red Flags:")
-            for flag in analysis['redFlags']:
-                print(f"- {flag}")
-
-        # Check for positive indicators
-        if analysis['positiveIndicators']:
-            print("\n✅ Positive Indicators:")
-            for indicator in analysis['positiveIndicators']:
-                print(f"- {indicator}")
-        ```
-        """
-        # Ensure valid authentication
-        if not self.ensure_authenticated():
-            self.logger.error("Authentication failed when getting token analysis")
-            raise ValueError(
-                "Authentication failed. Please login first or check your credentials."
-            )
-
-        url = (
-            f"{API_BASE_URL_V10}/token-analysis?devAddress={dev_address}"
-            f"&tokenTicker={token_ticker}"
-        )
-        self.logger.debug(
-            "Getting token analysis for %s by developer %s",
-            token_ticker,
-            dev_address,
-        )
-
-        try:
-            response = self.auth_manager.make_authenticated_request("GET", url)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            self.logger.error(
-                "HTTP error getting token analysis: %s - %s",
-                e.response.status_code,
-                e,
-            )
-            raise Exception(
-                f"Failed to get token analysis (HTTP {e.response.status_code}): {e}"
-            ) from e
-        except Exception as e:
-            self.logger.error("Error getting token analysis: %s", e)
-            raise Exception(f"Failed to get token analysis: {e}") from e
+        import re
+        import pathlib
+        import pickle
+
+        re_pattern: re.Pattern = re.compile(pattern)
+        save_path = pathlib.Path(file).resolve()
+        cookies = pickle.load(save_path.open("r+b"))
+        included_cookies = []
+
+        for cookie in cookies:
+            for match in re_pattern.finditer(str(cookie.__dict__)):
+                included_cookies.append(cookie)
+                self.logger.debug(
+                    "loaded cookie for matching pattern '%s' => (%s: %s)",
+                    re_pattern.pattern,
+                    cookie.name,
+                    cookie.value,
+                )
+                break
+        self.session.cookie_jar.update_cookies(included_cookies)

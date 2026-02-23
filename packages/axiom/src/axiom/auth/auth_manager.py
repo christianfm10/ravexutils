@@ -29,10 +29,11 @@ async with httpx.AsyncClient() as client:
 # Standard library imports
 import base64
 import hashlib
+from http.cookies import SimpleCookie
 import json
 import logging
 import time
-from typing import Union
+from typing import Any, Union
 
 # Third-party imports
 # httpx: Modern, async-capable HTTP client library (replaces requests)
@@ -243,7 +244,6 @@ class AuthManager:
             self.logger.info(
                 "Saved tokens are expired, will attempt refresh on next request"
             )
-            self.refresh_tokens()
 
     def _set_tokens(
         self,
@@ -542,7 +542,7 @@ class AuthManager:
         - Tries both cookie and JSON response formats
         - Logs detailed errors for debugging
         """
-        from axiomclient.urls import AAllBaseUrls, AxiomTradeApiUrls
+        from axiom.urls import AAllBaseUrls, AxiomTradeApiUrls
 
         # Hash password for verification
         # b64_password = self._compute_password_hash(b64_password)
@@ -1072,6 +1072,69 @@ class AuthManager:
         response = httpx.request(method, url, headers=authenticated_headers, **kwargs)
 
         return response
+
+    def get_refresh_cookies(self) -> dict[str, str]:
+        """
+        Get cookies required for token refresh requests.
+
+        Returns a dictionary of cookies that includes both the access token
+        and refresh token, as required by the API for token refresh operations.
+
+        ## Returns:
+        - `dict`: Cookies with keys 'auth-access-token' and 'auth-refresh-token'
+
+        ## Example:
+        ```python
+        cookies = auth.get_refresh_cookies()
+        # Returns: {
+        #   'auth-access-token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        #   'auth-refresh-token': 'refresh_abc123'
+        # }
+        ```
+        """
+        if not self.tokens:
+            return {}
+
+        return {
+            "auth-access-token": self.tokens.access_token,
+            "auth-refresh-token": self.tokens.refresh_token,
+        }
+
+    def needs_refresh(self) -> bool:
+        """
+        Check if the current access token needs to be refreshed.
+
+        Determines if the token is within the refresh threshold (e.g., 5 minutes)
+        before expiration, indicating that a refresh should be performed soon.
+
+        ## Returns:
+        - `bool`: True if token needs refresh, False otherwise
+
+        ## Example:
+        ```python
+        if auth.needs_refresh():
+            print("Token is nearing expiration and should be refreshed soon.")
+        ```
+        """
+
+        return self.tokens is not None and (self.tokens.is_expired)
+
+    def process_refresh_response(
+        self, response_data: dict[str, Any], cookies: SimpleCookie
+    ):
+        """Process token refresh response."""
+        new_auth_token = str(cookies.get("auth-access-token"))
+        new_refresh_token = str(cookies.get("auth-refresh-token"))
+        if self.tokens is None:
+            self.logger.error("No existing tokens to refresh")
+            return False
+
+        if new_auth_token:
+            refresh_token_to_use = new_refresh_token or self.tokens.refresh_token
+            self._set_tokens(new_auth_token, refresh_token_to_use)
+            return True
+
+        return False
 
 
 # Convenience function for quick session creation

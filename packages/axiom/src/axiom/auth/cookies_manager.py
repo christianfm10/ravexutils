@@ -116,3 +116,47 @@ class CookieManager:
         return (
             "auth-access-token" in self.cookies and "auth-refresh-token" in self.cookies
         )
+
+    def get_all(self) -> dict[str, str]:
+        """
+        Get all cookies as a dictionary.
+
+        Returns the internal cookie store as a dictionary of cookie names and values.
+
+        ## Returns:
+        - `dict[str, str]`: Dictionary of cookie names to values
+          Example: {"auth-access-token": "token_value", "auth-refresh-token": "refresh_value"}
+          Returns empty dict if no cookies are set
+        """
+        return self.cookies.copy()
+
+    def set_all(self, cookies: dict[str, str]) -> None:
+        """
+        Set multiple cookies at once from a dictionary.
+
+        Updates the internal cookie store with the provided cookies.
+
+        ## Args:
+        - `cookies` (dict[str, str]): Dictionary of cookie names to values
+          Example: {"auth-access-token": "token_value", "auth-refresh-token": "refresh_value"}
+
+        ## Side Effects:
+        - Updates internal cookie store with provided cookies
+        - Existing cookies with the same names will be overwritten
+        """
+        self.cookies.update(cookies)
+        self.logger.debug("Multiple cookies set in cookie manager")
+
+    def clear_all(self) -> None:
+        """
+        Clear all cookies from storage.
+
+        Removes all cookies from the internal store. Use with caution as this will
+        remove any non-auth cookies if they are stored here.
+
+        ## Side Effects:
+        - Clears entire cookie store, not just auth cookies
+        - Use clear_auth_cookies() if you only want to clear auth tokens
+        """
+        self.cookies.clear()
+        self.logger.debug("All cookies cleared from cookie manager")
