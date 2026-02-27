@@ -6,6 +6,12 @@ class UserCreatedCoin(APIBaseModel):
     symbol: str
     mint: str
     bonding_curve: str
+    creator: str
+    ath_market_cap: float
+    ath_market_cap_timestamp: int
+    description: str | None = None
+    banner_uri: str | None = None
+    complete: bool = False
     ath_market_cap: float | None = None
     created_timestamp: int | None = None
     description: str | None = None
