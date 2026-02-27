@@ -11,7 +11,7 @@ from typing import Any
 import logging
 
 import aiohttp
-from aiohttp import ClientTimeout, TCPConnector
+from aiohttp import ClientTimeout, CookieJar, TCPConnector
 
 from .exceptions import HTTPError, ProxyError, ConfigurationError
 from .tls import create_tls_context
@@ -50,6 +50,7 @@ class BaseAioHttpClient(ABC):
     """
 
     BASE_URL: str = "https://api.example.com"
+    SESSION_FILE: str = "session2.dat"
 
     def __init__(
         self,
@@ -60,6 +61,7 @@ class BaseAioHttpClient(ABC):
         use_tls_fingerprint: bool = False,
         ecdh_curve: str | None = None,
         cipher_suite: str | None = None,
+        load_cookies: bool = False,
         **kwargs: Any,
     ):
         """
@@ -94,6 +96,12 @@ class BaseAioHttpClient(ABC):
         if self.clearance is not None:
             self.cookies["cf_clearance"] = self.clearance
             logger.debug("Cloudflare clearance cookie configured")
+
+        # Load Cookies
+        cookie_jar = kwargs.pop("cookie_jar", None)
+        if load_cookies:
+            cookie_jar = CookieJar()
+            cookie_jar.load(self.SESSION_FILE)
 
         # Configure proxy if provided
         proxy_url = None
@@ -146,6 +154,7 @@ class BaseAioHttpClient(ABC):
             headers=headers,
             timeout=timeout_config,
             connector=connector,
+            cookie_jar=cookie_jar,
             **kwargs,
         )
 

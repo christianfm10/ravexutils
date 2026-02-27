@@ -132,6 +132,7 @@ class BaseClient(ABC):
         default_headers = {
             "Accept": "application/json",
             "User-Agent": "RavexClient/0.1.0",
+            **(kwargs.get("headers", {})),
         }
         self.client.headers.update(default_headers)
 
@@ -175,6 +176,7 @@ class BaseClient(ABC):
 
         try:
             logger.debug(f"{method} {url}")
+
             response = await self.client.request(
                 method,
                 url,
@@ -228,7 +230,7 @@ class BaseClient(ABC):
 
     async def _post(
         self,
-        endpoint: str,
+        endpoint: str = "",
         payload: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:

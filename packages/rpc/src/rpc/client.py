@@ -126,7 +126,7 @@ class RPC_Client(Client):
             "params": params,
         }
 
-        result = await self._fetch("POST", payload=payload)
+        result = await self._post(payload=payload)
 
         if "error" in result:
             error_msg = result["error"].get("message", "Error desconocido")
@@ -200,7 +200,7 @@ class RPC_Client(Client):
             "params": params,
         }
 
-        result = await self._fetch("POST", payload=payload)
+        result = await self._post(payload=payload)
 
         if "error" in result:
             error_msg = result["error"].get("message", "Error desconocido")
@@ -257,7 +257,7 @@ class RPC_Client(Client):
             "params": params,
         }
 
-        result = await self._fetch("POST", payload=payload)
+        result = await self._post(payload=payload)
 
         if "error" in result:
             error_msg = result["error"].get("message", "Error desconocido")
@@ -302,7 +302,7 @@ class RPC_Client(Client):
             "params": params,
         }
 
-        result = await self._fetch("POST", payload=payload)
+        result = await self._post(payload=payload)
 
         if "error" in result:
             error_msg = result["error"].get("message", "Error desconocido")
@@ -373,7 +373,7 @@ class RPC_Client(Client):
             "params": params,
         }
 
-        result = await self._fetch("POST", payload=payload)
+        result = await self._post(payload=payload)
 
         if "error" in result:
             error_msg = result["error"].get("message", "Error desconocido")

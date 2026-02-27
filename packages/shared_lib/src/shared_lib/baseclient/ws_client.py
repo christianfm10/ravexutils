@@ -270,7 +270,7 @@ class WebSocketClient(ABC):
             self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
             self.ws = await session.ws_connect(
                 self.ws_url,
-                headers=self.HEADERS,
+                # headers=self.HEADERS,
                 # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
                 # heartbeat=30,
             )
@@ -497,7 +497,7 @@ class WebSocketClient(ABC):
                 await asyncio.sleep(1)  # Brief pause before reconnection
 
             # Attempt to reconnect (common path for all disconnections)
-            if await self._reconnect(connection_type="main"):
+            if await self._reconnect():
                 self.logger.info(
                     f"✅ {self.__class__.__name__} WebSocket reconnected, resuming message handling"
                 )
@@ -588,7 +588,7 @@ class WebSocketClient(ABC):
 
         await self.ws.send_json(message)
 
-    async def _reconnect(self, connection_type: str = "main") -> bool:
+    async def _reconnect(self) -> bool:
         """
         Attempt to reconnect to WebSocket with exponential backoff.
 

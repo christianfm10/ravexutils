@@ -129,7 +129,7 @@ class TestBaseAioHttpClientFetchMethod:
         with patch.object(
             client.session, "request", return_value=mock_response
         ) as mock_request:
-            result = await client._fetch("GET", "/users/1")
+            result = await client.fetch_json("GET", "/users/1")
 
             assert result == {"id": 1, "name": "test"}
             mock_request.assert_called_once_with(
@@ -159,7 +159,7 @@ class TestBaseAioHttpClientFetchMethod:
         with patch.object(
             client.session, "request", return_value=mock_response
         ) as mock_request:
-            result = await client._fetch("POST", "/users", payload=payload)
+            result = await client.fetch_json("POST", "/users", payload=payload)
 
             assert result == {"id": 2, "name": "created"}
             mock_request.assert_called_once_with(
@@ -189,7 +189,7 @@ class TestBaseAioHttpClientFetchMethod:
         with patch.object(
             client.session, "request", return_value=mock_response
         ) as mock_request:
-            result = await client._fetch("GET", "/users", params=params)
+            result = await client.fetch_json("GET", "/users", params=params)
 
             assert result == {"results": []}
             mock_request.assert_called_once_with(
@@ -219,7 +219,7 @@ class TestBaseAioHttpClientFetchMethod:
         with patch.object(
             client.session, "request", return_value=mock_response
         ) as mock_request:
-            result = await client._fetch("GET", "/data", headers=custom_headers)
+            result = await client.fetch_json("GET", "/data", headers=custom_headers)
 
             assert result == {"data": "test"}
             mock_request.assert_called_once_with(
@@ -247,7 +247,7 @@ class TestBaseAioHttpClientFetchMethod:
         with patch.object(
             client.session, "request", return_value=mock_response
         ) as mock_request:
-            await client._fetch("GET", "/data")
+            await client.fetch_json("GET", "/data")
 
             # Verify proxy was passed to the request
             call_kwargs = mock_request.call_args[1]
@@ -264,7 +264,7 @@ class TestBaseAioHttpClientConvenienceMethods:
         """Test _get convenience method."""
         client = _AioHttpAPIClient()
 
-        with patch.object(client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+        with patch.object(client, "fetch_json", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = {"id": 1}
 
             result = await client._get("/users/1", params={"fields": "all"})
@@ -283,7 +283,7 @@ class TestBaseAioHttpClientConvenienceMethods:
 
         payload = {"name": "test"}
 
-        with patch.object(client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+        with patch.object(client, "fetch_json", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = {"id": 2, "name": "test"}
 
             result = await client._post("/users", payload=payload)
@@ -300,7 +300,7 @@ class TestBaseAioHttpClientConvenienceMethods:
 
         payload = {"name": "updated"}
 
-        with patch.object(client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+        with patch.object(client, "fetch_json", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = {"id": 1, "name": "updated"}
 
             result = await client._put("/users/1", payload=payload)
@@ -315,7 +315,7 @@ class TestBaseAioHttpClientConvenienceMethods:
         """Test _delete convenience method."""
         client = _AioHttpAPIClient()
 
-        with patch.object(client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+        with patch.object(client, "fetch_json", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = {"message": "deleted"}
 
             result = await client._delete("/users/1")
