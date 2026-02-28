@@ -98,7 +98,7 @@ class BaseAioHttpClient(ABC):
             logger.debug("Cloudflare clearance cookie configured")
 
         # Load Cookies
-        cookie_jar = kwargs.pop("cookie_jar", None)
+        cookie_jar: CookieJar | None = kwargs.pop("cookie_jar", None)
         if load_cookies:
             cookie_jar = CookieJar()
             cookie_jar.load(self.SESSION_FILE)
@@ -162,6 +162,24 @@ class BaseAioHttpClient(ABC):
         self._proxy_url = proxy_url
 
         logger.info(f"AioHttp client initialized with base URL: {self.base_url}")
+
+    async def fetch(
+        self,
+        method: str,
+        endpoint: str = "",
+        params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> aiohttp.ClientResponse:
+        return await self._fetch(
+            method,
+            endpoint,
+            params=params,
+            payload=payload,
+            headers=headers,
+            **kwargs,
+        )
 
     async def _fetch(
         self,
@@ -249,7 +267,7 @@ class BaseAioHttpClient(ABC):
             logger.error(f"Unexpected error: {e}")
             raise HTTPError(f"Request failed: {e}") from e
 
-    async def fetch_json(
+    async def _fetch_json(
         self,
         method: str,
         endpoint: str = "",
@@ -288,6 +306,41 @@ class BaseAioHttpClient(ABC):
         except aiohttp.ContentTypeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
             raise HTTPError(f"Invalid JSON response: {e}") from e
+
+    async def fetch_json(
+        self,
+        method: str,
+        endpoint: str = "",
+        params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Public method to perform an HTTP request and return JSON response.
+
+        This method is intended to be used by subclasses as the main way to
+        perform API requests. It simply calls _fetch_json internally.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE, PATCH, etc.).
+            endpoint: API endpoint path (will be appended to BASE_URL).
+            params: Query parameters for the request.
+            payload: JSON payload for POST/PUT/PATCH requests.
+            headers: Additional headers for this specific request.
+            **kwargs: Additional arguments passed to aiohttp request method.
+
+        Returns:
+            Parsed JSON response as a dictionary.
+        """
+        return await self._fetch_json(
+            method,
+            endpoint,
+            params=params,
+            payload=payload,
+            headers=headers,
+            **kwargs,
+        )
 
     async def _get(
         self,
