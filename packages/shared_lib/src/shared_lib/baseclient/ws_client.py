@@ -269,7 +269,7 @@ class WebSocketClient(ABC):
 
             # Attempt WebSocket connection using aiohttp
             self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
-            print(session.headers)
+
             self.ws = await session.ws_connect(
                 self.ws_url,
                 # headers=self.HEADERS,
