@@ -60,7 +60,8 @@ if TYPE_CHECKING:
     from axiom.auth.auth_manager import AuthManager
 
 # WebSocket URL for Axiom Pulse
-WS_PULSE_URL = "wss://pulse2.axiom.trade/ws"
+# WS_PULSE_URL = "wss://pulse2.axiom.trade/ws"
+WS_PULSE_URL = "wss://pulse.axiom.trade/ws"
 
 
 def _decode_message_content(content: bytes) -> Any:
@@ -111,11 +112,19 @@ class AxiomPulseWSClient(WebSocketClient):
     - Supports custom filters and table selections
     """
 
+    HEADERS = {
+        "Origin": "https://axiom.trade",
+        "Host": "pulse2.axiom.trade",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
     def __init__(
         self,
-        auth_manager: "AuthManager",
+        # auth_manager: "AuthManager",
         log_level: int = logging.INFO,
         telegram_bot: Optional["TelegramBot"] = None,
+        client: Any | None = None,
     ) -> None:
         """
         Initialize Axiom Pulse WebSocket client.
@@ -128,67 +137,25 @@ class AxiomPulseWSClient(WebSocketClient):
         ## Raises:
         - `ValueError`: If auth_manager is None or invalid
         """
-        if not auth_manager:
-            raise ValueError("auth_manager is required")
+        # if not auth_manager:
+        #     raise ValueError("auth_manager is required")
 
-        self.auth_manager = auth_manager
+        # self.auth_manager = auth_manager
 
         # Call parent constructor
         super().__init__(
             log_level=log_level,
             ws_url=WS_PULSE_URL,
             telegram_bot=telegram_bot,
+            client=client,
         )
 
         # Override logger name
         self.logger = logging.getLogger("AxiomPulseWS")
         self.logger.setLevel(log_level)
 
-        # Build authenticated headers for connection
-        self.HEADERS = self._build_connection_headers()
-
         # Store Pulse configuration for reconnection
-        self._pulse_user_state: Optional[Dict[str, Any]] = None
-
-    def _build_connection_headers(self) -> Dict[str, str]:
-        """
-        Build HTTP headers for WebSocket connection handshake.
-
-        Includes authentication cookies required by Axiom Trade server.
-
-        ## Returns:
-        - `dict`: Headers dictionary for WebSocket connection
-        """
-        # Ensure valid authentication
-        if not self.auth_manager.ensure_valid_authentication():
-            self.logger.error("Authentication failed when building headers")
-            return {}
-
-        tokens = self.auth_manager.get_tokens()
-        if not tokens:
-            self.logger.error("No authentication tokens available")
-            return {}
-
-        headers = {
-            "Origin": "https://axiom.trade",
-            "Cache-Control": "no-cache",
-            "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
-            "Pragma": "no-cache",
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/135.0.0.0 Safari/537.36"
-            ),
-        }
-
-        # Add authentication cookies
-        cookie_header = (
-            f"auth-access-token={tokens.access_token}; "
-            f"auth-refresh-token={tokens.refresh_token}"
-        )
-        headers["Cookie"] = cookie_header
-
-        return headers
+        self._pulse_user_state: Optional[dict[str, Any]] = None
 
     async def _message_handler(self, message: Any) -> None:
         """
@@ -209,7 +176,7 @@ class AxiomPulseWSClient(WebSocketClient):
         decoded_message = None  # Initialize to avoid unbound variable error
         try:
             # Decode binary message
-            decoded_message = _decode_message_content(message.data)
+            decoded_message = _decode_message_content(message)
 
             # Route to Pulse callback if registered
             if "pulse" in self._callbacks:

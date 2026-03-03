@@ -75,9 +75,16 @@ class AxiomClusterWSClient(WebSocketClient):
     - `b-{address}`: Token-specific market cap updates
     """
 
+    HEADERS = {
+        "Origin": "https://axiom.trade",
+        "Host": "cluster3.axiom.trade",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
     def __init__(
         self,
-        auth_manager: "AuthManager",
+        # auth_manager: "AuthManager",
         log_level: int = logging.INFO,
         telegram_bot: Optional["TelegramBot"] = None,
         client: Optional[Any] = None,
@@ -93,10 +100,10 @@ class AxiomClusterWSClient(WebSocketClient):
         ## Raises:
         - `ValueError`: If auth_manager is None or invalid
         """
-        if not auth_manager:
-            raise ValueError("auth_manager is required")
+        # if not auth_manager:
+        #     raise ValueError("auth_manager is required")
 
-        self.auth_manager = auth_manager
+        # self.auth_manager = auth_manager
 
         # Call parent constructor
         super().__init__(
@@ -109,49 +116,6 @@ class AxiomClusterWSClient(WebSocketClient):
         # Override logger name
         self.logger = logging.getLogger("AxiomClusterWS")
         self.logger.setLevel(log_level)
-
-        # Build authenticated headers for connection
-        # self.HEADERS = self._build_connection_headers()
-
-    def _build_connection_headers(self) -> Dict[str, str]:
-        """
-        Build HTTP headers for WebSocket connection handshake.
-
-        Includes authentication cookies required by Axiom Trade server.
-
-        ## Returns:
-        - `dict`: Headers dictionary for WebSocket connection
-        """
-        # Ensure valid authentication
-        if not self.auth_manager.ensure_valid_authentication():
-            self.logger.error("Authentication failed when building headers")
-            return {}
-
-        tokens = self.auth_manager.get_tokens()
-        if not tokens:
-            self.logger.error("No authentication tokens available")
-            return {}
-
-        headers = {
-            "Origin": "https://axiom.trade",
-            "Cache-Control": "no-cache",
-            "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
-            "Pragma": "no-cache",
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/135.0.0.0 Safari/537.36"
-            ),
-        }
-
-        # Add authentication cookies
-        cookie_header = (
-            f"auth-access-token={tokens.access_token}; "
-            f"auth-refresh-token={tokens.refresh_token}"
-        )
-        headers["Cookie"] = cookie_header
-
-        return headers
 
     async def _message_handler(self, message: Any) -> None:
         """
@@ -208,17 +172,6 @@ class AxiomClusterWSClient(WebSocketClient):
         - `b-{address}` → callback["token_mcap_{address}"]
         """
         # Handle direct room matches
-        # if room == ROOM_NEW_PAIRS and ROOM_NEW_PAIRS in self._callbacks:
-        #     await self._callbacks[ROOM_NEW_PAIRS](data)
-        #     return
-
-        # if room == ROOM_MIGRATIONS and ROOM_MIGRATIONS in self._callbacks:
-        #     await self._callbacks[ROOM_MIGRATIONS](data)
-        #     return
-
-        # if room == ROOM_SOL_PRICE and ROOM_SOL_PRICE in self._callbacks:
-        #     await self._callbacks[ROOM_SOL_PRICE](data)
-        #     return
         if room in self._callbacks:
             await self._callbacks[room](data)
             return

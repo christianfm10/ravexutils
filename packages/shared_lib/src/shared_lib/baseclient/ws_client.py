@@ -224,6 +224,7 @@ class WebSocketClient(ABC):
                 # Create new session
                 self._session = aiohttp.ClientSession()
                 self.logger.debug("Created new aiohttp session for WebSocket")
+        self._session.headers.update(self.HEADERS)  # Add WebSocket-specific headers
         return self._session
 
     async def connect(self) -> bool:
@@ -268,6 +269,7 @@ class WebSocketClient(ABC):
 
             # Attempt WebSocket connection using aiohttp
             self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
+            print(session.headers)
             self.ws = await session.ws_connect(
                 self.ws_url,
                 # headers=self.HEADERS,
@@ -425,7 +427,10 @@ class WebSocketClient(ABC):
             try:
                 # Async iteration over WebSocket messages using aiohttp
                 async for msg in self.ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
+                    if (
+                        msg.type == aiohttp.WSMsgType.TEXT
+                        or msg.type == aiohttp.WSMsgType.BINARY
+                    ):
                         try:
                             await self._message_handler(msg.data)
 

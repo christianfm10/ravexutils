@@ -7,11 +7,13 @@ Cloudflare clearance handling.
 """
 
 from abc import ABC
+from pathlib import Path
 from typing import Any
 import logging
 
 import aiohttp
 from aiohttp import ClientTimeout, CookieJar, TCPConnector
+from yarl import URL
 
 from .exceptions import HTTPError, ProxyError, ConfigurationError
 from .tls import create_tls_context
@@ -50,7 +52,8 @@ class BaseAioHttpClient(ABC):
     """
 
     BASE_URL: str = "https://api.example.com"
-    SESSION_FILE: str = "session2.dat"
+    _ORIGIN: str = BASE_URL
+    SESSION_FILE: str = "session.dat"
 
     def __init__(
         self,
@@ -100,9 +103,23 @@ class BaseAioHttpClient(ABC):
         # Load Cookies
         cookie_jar: CookieJar | None = kwargs.pop("cookie_jar", None)
         if load_cookies:
-            cookie_jar = CookieJar()
-            cookie_jar.load(self.SESSION_FILE)
-
+            session_path = Path(self.SESSION_FILE)
+            if session_path.exists():
+                cookie_jar = CookieJar()
+                cookie_jar.load(session_path)
+                logger.debug("Cookies loaded from %s", session_path)
+            else:
+                if cookie_jar and "auth-refresh-token" in cookie_jar.filter_cookies(
+                    self._origin_url
+                ):
+                    logger.warning(
+                        "Session file %s not found – starting with empty jar, trying using cookies from provided cookie_jar",
+                        session_path,
+                    )
+                else:
+                    raise ConfigurationError(
+                        f"Session file {session_path} not found for loading cookies"
+                    )
         # Configure proxy if provided
         proxy_url = None
         if self.proxy is not None:
@@ -460,3 +477,8 @@ class BaseAioHttpClient(ABC):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Ensure client is closed when exiting context."""
         await self.close()
+
+    @property
+    def _origin_url(self) -> URL:
+        """Cached :class:`~yarl.URL` for the Axiom origin."""
+        return URL(self._ORIGIN)
