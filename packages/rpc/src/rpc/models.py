@@ -331,7 +331,7 @@ class RPCSignatureInfo(APIBaseModel):
 
     signature: str
     slot: int
-    err: dict[str, Any] | None = None
+    err: dict[str, Any] | str | None = None
     memo: str | None = None
     blockTime: int | None = None
     confirmationStatus: str | None = None
