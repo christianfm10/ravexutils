@@ -9,7 +9,7 @@ def setup_logging(log_file: bool = False, log_name: str = "temp.log"):
         rotatating_handler = RotatingFileHandler(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
         )
-        rotatating_handler.setLevel(logging.INFO)
+        rotatating_handler.setLevel(logging.WARNING)
         handlers.append(rotatating_handler)
     logging.getLogger("nodriver").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
