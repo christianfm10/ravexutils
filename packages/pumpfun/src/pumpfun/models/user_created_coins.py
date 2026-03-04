@@ -7,7 +7,7 @@ class UserCreatedCoin(APIBaseModel):
     mint: str
     bonding_curve: str
     creator: str
-    ath_market_cap_timestamp: int
+    ath_market_cap_timestamp: int | None = None
     description: str | None = None
     banner_uri: str | None = None
     complete: bool = False

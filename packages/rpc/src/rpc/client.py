@@ -468,16 +468,19 @@ class RPC_Client(Client):
         address: str,
         page_size: int = 10,
         max_pages: int = 5,
+        before: str | None = None,
+        until: str | None = None,
         handle_signature_callback: Callable[[RPCSignatureInfo], Awaitable[None]]
         | None = None,
     ):
-        before = None
+        before = before
         for page in range(max_pages):
             print(f"Fetching page {page + 1} of signatures for address {address}...")
             result = await self.get_signatures_for_address(
                 address=address,
                 limit=page_size,
                 before=before,
+                until=until,
             )
             before = result.signatures[-1].signature if result.signatures else None
 
