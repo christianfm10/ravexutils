@@ -472,8 +472,9 @@ class RPC_Client(Client):
         until: str | None = None,
         handle_signature_callback: Callable[[RPCSignatureInfo], Awaitable[None]]
         | None = None,
-    ):
+    ) -> str:
         before = before
+        last_signature = ""
         for page in range(max_pages):
             print(f"Fetching page {page + 1} of signatures for address {address}...")
             result = await self.get_signatures_for_address(
@@ -484,69 +485,12 @@ class RPC_Client(Client):
             )
             before = result.signatures[-1].signature if result.signatures else None
 
-            for signature in result.signatures:
-                await handle_signature_callback(
-                    signature
-                ) if handle_signature_callback else None
+            if handle_signature_callback is not None:
+                for signature in result.signatures:
+                    await handle_signature_callback(signature)
 
             if len(result.signatures) < page_size:
                 print("No more signatures to fetch.")
+                last_signature = before if before is not None else ""
                 break
-
-            # result = await self.get_signatures_for_address(
-            #     address=address,
-            #     limit=size_limit,
-            # )
-
-            # if len(result.signatures) < size_limit:
-            #     funding_signature = result.signatures[-1].signature
-            #     result = await self.get_transaction(signature=funding_signature)
-            #     address = result.transaction.message.account_keys[0]
-            #     print(f"  Found funding txn: {funding_signature}")
-            #     print(f"  New address: {address}")
-            #     print(f"  SOL change: {result.meta.delta_balances[0] / 1e9} SOL")
-
-    #         if len(result.signatures) == 0:
-    #             print("  No se encontraron más transacciones.")
-    #             break
-
-    #         txn = result.signatures[-1]
-    #         result = await self.get_transaction(signature=txn.signature)
-
-    #         if result.meta.delta_balances[0] > 0:
-    #             print("  🚀 ¡Instrucción de recepción detectada!")
-    #             break
-    #         elif result.meta.delta_balances[0] < 0:
-    #             address = result.transaction.message.account_keys[0]
-    #             print(f"Found send txn from address: {address}")
-
-    #         return
-    #         result = await rpc_client.get_signatures_for_address(
-    #         # address="FzzetY6rk2VgPAsqThqDbL8X1RB1u3TP4xLJKoG7MVHY",
-    #         address="28QrY82PD7Ba7owMcQAiBVDrovYgKP8HZFFY6gN48DLB",
-    #         # before="4TjEdy1pANtr5oL7ToAcPWMiEA5EAcZK1UH5vib78wrPeMGsUYqfB2RJnsTHBWYrABwARso5fLjp85AjTGdcU9UW",
-    #         before="5JHDEhkoP5k2Y4KJRX3Vb5LgPi2W2QPjTc9zHT1BMbDsPLb9wcakg7g71RimBHxSwCB3NZDwkt2nwHJurynwRXmW",
-    #         commitment="finalized",
-    #         limit=10,
-    #     )
-    #     for i in range(4):
-    #         if 0 < len(result.signatures):
-    #             txn = result.signatures[-1]
-    #             result = await rpc_client.get_transaction(signature=txn.signature)
-    #             if DEBRIDGE in result.transaction.message.account_keys:
-    #                 print(
-    #                     f"Found debridge txn:{result.meta.delta_balances[0] / 1e9} SOL"
-    #                 )
-    #                 break
-    #             elif result.meta.delta_balances[0] < 0:
-    #                 address = result.transaction.message.account_keys[0]
-    #                 print(f"Found send txn from address: {address}")
-    #                 print(f"Amount: {result.meta.delta_balances[0] / 1e9} SOL")
-    #                 result = await rpc_client.get_signatures_for_address(
-    #                     address=address, limit=100
-    #                 )
-    #                 # print(f"Last signature: {result.signatures[-1]}")
-    #             else:
-    #                 break
-    #         else:
-    #             print("No more signatures to process.")
+        return last_signature
