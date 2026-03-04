@@ -176,6 +176,7 @@ class RPCGetTransactionResult(APIBaseModel):
     sol_amount: float | None = None
     send_sol_amount: float | None = None
     buyed_tokens_amount: int | None = None
+    block_time: int = Field(alias="blockTime")
 
     @model_validator(mode="after")
     def set_buyed_tokens(self) -> "RPCGetTransactionResult":
