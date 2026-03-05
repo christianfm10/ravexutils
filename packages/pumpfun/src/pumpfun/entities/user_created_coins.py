@@ -31,6 +31,7 @@ class UserCreatedCoinDB(Base):
     website = Column(String, nullable=True)
     twitter = Column(String, nullable=True)
     metadata_uri = Column(String, nullable=True)
+    init_price = Column(Float, nullable=True)
 
     # Timestamps
     inserted_at = Column(DateTime, default=func.now(), nullable=False)
