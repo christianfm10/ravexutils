@@ -172,7 +172,8 @@ class BaseClient(ABC):
             >>> await self._fetch("GET", "/users", params={"page": 1})
             >>> await self._fetch("POST", "/users", payload={"name": "John"})
         """
-        url = f"{self.base_url}{endpoint}"
+        base_url = kwargs.pop("base_url", self.base_url)
+        url = f"{base_url}{endpoint}"
 
         try:
             logger.debug(f"{method} {url}")

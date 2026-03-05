@@ -1,3 +1,4 @@
+from pumpfun.models.candles import Candles
 from shared_lib.baseclient.client import BaseClient
 from .models.coin_info import (
     CoinInfoResponse,
@@ -15,7 +16,7 @@ class PumpfunClient(BaseClient):
     """Pumpfun Client Class"""
 
     BASE_URL = "https://frontend-api-v3.pump.fun"
-    BASE_V1 = "https://swap-api.pump.fun/v1"
+    BASE_V2 = "https://swap-api.pump.fun/v2"
     BASE_ADVANCED = "https://advanced-api-v2.pump.fun"
 
     DEFAULT_HEADERS = {
@@ -84,10 +85,49 @@ class PumpfunClient(BaseClient):
 
         endpoint = f"/coins/{token_address}/trades/batch"
         payload = {"userAddresses": [f"{user_address}"]}
-        self.BASE_URL = self.BASE_V1
+        self.BASE_URL = self.BASE_V2
 
         trades = UserTradesResponse(
             **await self._fetch("POST", endpoint, payload=payload)
         )
 
         return trades.user_trades
+
+    async def get_candles(
+        self,
+        token_address: str,
+        *,
+        interval: str = "15s",
+        limit: int = 10,
+        currency: str = "USD",
+        program: str = "pump",
+        createdTs: int,
+        beforeTs: int | None = None,
+        **kwargs,
+    ) -> list[Candles]:
+        r"""Sends a GET request to the Pump.fun swap API to fetch candle data.
+
+        :param token_address: Token mint.
+        :param interval: Time interval for each candle. Example: ``15s``.
+        :param \*\*kwargs: Optional query parameters:
+            - ``limit`` (int): Maximum number of candles to return. Example: ``1000``.
+            - ``currency`` (str): Currency in which the candle values are denominated. Example: ``USD``.
+            - ``before_ts`` (int): Unix timestamp to fetch candles before that time. Example: ``1748671695``.
+        :return: Diccionario con la información del token o mensaje de error.
+        """
+        url = f"/coins/{token_address}/candles"
+        params = {
+            "interval": interval,
+            "limit": limit,
+            "currency": currency,
+            "program": program,
+            "createdTs": createdTs,
+        }
+        if beforeTs is not None:
+            params["beforeTs"] = beforeTs
+        params.update(**kwargs)
+        data = await self._get(url, params=params, base_url=self.BASE_V2)
+        data = [data] if isinstance(data, dict) else data
+
+        data = [Candles(**x) for x in data]
+        return data
