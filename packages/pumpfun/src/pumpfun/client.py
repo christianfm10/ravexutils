@@ -16,6 +16,7 @@ class PumpfunClient(BaseClient):
     """Pumpfun Client Class"""
 
     BASE_URL = "https://frontend-api-v3.pump.fun"
+    BASE_V1 = "https://swap-api.pump.fun/v1"
     BASE_V2 = "https://swap-api.pump.fun/v2"
     BASE_ADVANCED = "https://advanced-api-v2.pump.fun"
 
@@ -77,7 +78,11 @@ class PumpfunClient(BaseClient):
         return data
 
     async def get_user_token_trades(
-        self, token_address: str, user_address: str
+        self,
+        token_address: str,
+        user_address: str,
+        createdTs: int,
+        program: str = "pump",
     ) -> list[Trades]:
         """
         Obtiene las operaciones (trades) realizadas por un desarrollador específico en una memecoin de Pump.fun.
@@ -85,10 +90,12 @@ class PumpfunClient(BaseClient):
 
         endpoint = f"/coins/{token_address}/trades/batch"
         payload = {"userAddresses": [f"{user_address}"]}
-        self.BASE_URL = self.BASE_V2
+        self.BASE_URL = self.BASE_V1
 
         trades = UserTradesResponse(
-            **await self._fetch("POST", endpoint, payload=payload)
+            **await self._fetch(
+                "POST", endpoint, payload=payload, base_url=self.BASE_V1
+            ),
         )
 
         return trades.user_trades
