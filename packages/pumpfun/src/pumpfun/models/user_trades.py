@@ -11,8 +11,8 @@ class Trades(APIBaseModel):
     type: str
     is_bonding_curve: bool = Field(..., alias="isBondingCurve")
     quote_amount: int = Field(..., alias="quoteAmount")
-    price_usd: float = Field(alias="priceUSD")
-    amount_sol: float = Field(alias="amountSOL")
+    price_usd: float | None = Field(..., alias="priceUSD")
+    amount_sol: float | None = Field(..., alias="amountSOL")
 
 
 class UserTradesResponse(APIBaseModel):
