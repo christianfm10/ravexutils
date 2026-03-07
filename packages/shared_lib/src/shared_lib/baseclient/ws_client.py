@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import json
+import aiohttp
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
-import aiohttp
-from shared_lib.baseclient.aiohttp_client import BaseAioHttpClient
+
+from axiom.client import AxiomClient
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
@@ -22,7 +23,7 @@ class WebSocketClient(ABC):
         log_level: Optional[int] = None,
         ws_url: str = WS_PRIMARY_URL,
         telegram_bot: Optional["TelegramBot"] = None,
-        client: Optional["BaseAioHttpClient"] = None,
+        client: Optional["AxiomClient"] = None,
     ) -> None:
         """
         Initialize WebSocket client with connection and notification settings.
@@ -269,13 +270,27 @@ class WebSocketClient(ABC):
 
             # Attempt WebSocket connection using aiohttp
             self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
+            try:
+                if (
+                    self._http_client is not None
+                    and not await self._http_client.ensure_authenticated()
+                ):
+                    self.logger.error(
+                        "Failed to authenticate. Cannot connect to WebSocket."
+                    )
+                    return False
 
-            self.ws = await session.ws_connect(
-                self.ws_url,
-                # headers=self.HEADERS,
-                # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
-                # heartbeat=30,
-            )
+                self.ws = await session.ws_connect(
+                    self.ws_url,
+                    headers=self.HEADERS,
+                    # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
+                    heartbeat=60,
+                )
+            except RuntimeError:
+                self.logger.error(
+                    "WebSocket connection failed: RuntimeError (possibly due to invalid URL or network issues)"
+                )
+                return False
             self.logger.info(f"✅ Connected to {self.ws_url} server")
 
             return True
@@ -676,6 +691,10 @@ class WebSocketClient(ABC):
                     )
 
                     return True
+                except RuntimeError as e:
+                    self.logger.error(
+                        f"WebSocket connection failed during reconnection attempt {attempt}: {e}"
+                    )
 
                 except Exception as e:
                     self.logger.error(

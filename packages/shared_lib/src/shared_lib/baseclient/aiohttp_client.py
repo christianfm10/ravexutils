@@ -6,6 +6,9 @@ using aiohttp. It includes support for proxies, custom headers, cookies, and
 Cloudflare clearance handling.
 """
 
+import pickle
+import pathlib
+import heapq
 from abc import ABC
 from pathlib import Path
 from typing import Any
@@ -17,6 +20,46 @@ from yarl import URL
 
 from .exceptions import HTTPError, ProxyError, ConfigurationError
 from .tls import create_tls_context
+
+
+class _FixedCookieJar(CookieJar):
+    """CookieJar with fixed save()/load() that persist the expiration state.
+
+    The default aiohttp CookieJar.save() only pickles self._cookies, leaving
+    self._expirations and self._expire_heap empty on load, so expired cookies
+    are never removed after loading from disk.
+
+    This subclass also persists _expirations (absolute Unix timestamps) so the
+    heap can be fully reconstructed on load — including cookies that originally
+    only had max-age (already converted to absolute time by aiohttp).
+    """
+
+    def save(self, file_path: Any) -> None:
+
+        file_path = pathlib.Path(file_path)
+        with file_path.open(mode="wb") as f:
+            pickle.dump(
+                (self._cookies, self._expirations),
+                f,
+                pickle.HIGHEST_PROTOCOL,
+            )
+
+    def load(self, file_path: Any) -> None:
+
+        file_path = pathlib.Path(file_path)
+        with file_path.open(mode="rb") as f:
+            data = pickle.load(f)
+
+        # Support old files that only contain _cookies (plain dict)
+        if isinstance(data, tuple):
+            self._cookies, self._expirations = data
+        else:
+            self._cookies = data
+            self._expirations = {}
+
+        # Rebuild the heap from the (absolute) expiration timestamps
+        self._expire_heap = list((when, key) for key, when in self._expirations.items())
+        heapq.heapify(self._expire_heap)
 
 
 logger = logging.getLogger(__name__)
@@ -101,11 +144,11 @@ class BaseAioHttpClient(ABC):
             logger.debug("Cloudflare clearance cookie configured")
 
         # Load Cookies
-        cookie_jar: CookieJar | None = kwargs.pop("cookie_jar", None)
+        cookie_jar: _FixedCookieJar | None = kwargs.pop("cookie_jar", None)
         if load_cookies:
             session_path = Path(self.SESSION_FILE)
             if session_path.exists():
-                cookie_jar = CookieJar()
+                cookie_jar = _FixedCookieJar()
                 cookie_jar.load(session_path)
                 logger.debug("Cookies loaded from %s", session_path)
             else:

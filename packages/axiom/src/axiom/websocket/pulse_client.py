@@ -57,7 +57,6 @@ from shared_lib.utils.notification import show_alert
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
-    from axiom.auth.auth_manager import AuthManager
 
 # WebSocket URL for Axiom Pulse
 # WS_PULSE_URL = "wss://pulse2.axiom.trade/ws"

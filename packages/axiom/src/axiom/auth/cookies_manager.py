@@ -1,4 +1,5 @@
 import logging
+from aiohttp.abc import AbstractCookieJar
 
 
 class CookieManager:
@@ -41,6 +42,7 @@ class CookieManager:
         - Initializes logger for debugging
         """
         self.cookies: dict[str, str] = {}
+        self.cooks: AbstractCookieJar | None = None
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
@@ -160,3 +162,98 @@ class CookieManager:
         """
         self.cookies.clear()
         self.logger.debug("All cookies cleared from cookie manager")
+
+    async def save(
+        self,
+        cookies: AbstractCookieJar,
+        file: str = "session.dat",
+        pattern: str = ".*",
+    ):
+        """
+        save all cookies (or a subset, controlled by `pattern`) to a file to be restored later
+
+        :param file:
+        :type file:
+        :param pattern: regex style pattern string.
+               any cookie that has a  domain, key or value field which matches the pattern will be included.
+               default = ".*"  (all)
+
+               eg: the pattern "(cf|.com|nowsecure)" will include those cookies which:
+                    - have a string "cf" (cloudflare)
+                    - have ".com" in them, in either domain, key or value field.
+                    - contain "nowsecure"
+        :type pattern: str
+        :return:
+        :rtype:
+        """
+        import re
+
+        import pathlib
+        import pickle
+
+        re_pattern: re.Pattern = re.compile(pattern)
+        save_path = pathlib.Path(file).resolve()
+
+        # cookies = await self.session.cookie_jar.get_all(requests_cookie_format=False)
+        cookies.clear(lambda cookie: cookie["domain"] == "")
+
+        print("Cookies::", cookies)
+        # print(cookies.keys())
+        # print(cookies.values())
+
+        included_cookies = []
+        for cookie in cookies:
+            # for match in re_pattern.finditer(str(cookie.__dict__)):
+            # self.logger.debug(
+            #     "saved cookie for matching pattern '%s' => (%s: %s)",
+            #     re_pattern.pattern,
+            #     cookie.name,
+            #     cookie.value,
+            # )
+            print("Cookie :", cookie.keys())
+            print("Cookie :", cookie.values())
+            print("Cookie :", cookie)
+            included_cookies.append(cookie)
+            # break
+        pickle.dump(included_cookies, save_path.open("w+b"))
+
+    async def load(self, file: str = "session.dat", pattern: str = ".*"):
+        """
+        load all cookies (or a subset, controlled by `pattern`) from a file created by :py:meth:`~save_cookies`.
+
+        :param file:
+        :type file:
+        :param pattern: regex style pattern string.
+               any cookie that has a  domain, key or value field which matches the pattern will be included.
+               default = ".*"  (all)
+
+               eg: the pattern "(cf|.com|nowsecure)" will include those cookies which:
+                    - have a string "cf" (cloudflare)
+                    - have ".com" in them, in either domain, key or value field.
+                    - contain "nowsecure"
+        :type pattern: str
+        :return:
+        :rtype:
+        """
+        import re
+        import pathlib
+        import pickle
+
+        re_pattern: re.Pattern = re.compile(pattern)
+        save_path = pathlib.Path(file).resolve()
+        cookies = pickle.load(save_path.open("r+b"))
+        included_cookies = []
+
+        for cookie in cookies:
+            for match in re_pattern.finditer(str(cookie.__dict__)):
+                included_cookies.append(cookie)
+                self.logger.debug(
+                    "loaded cookie for matching pattern '%s' => (%s: %s)",
+                    re_pattern.pattern,
+                    cookie.name,
+                    cookie.value,
+                )
+                break
+        if self.cooks is not None:
+            self.cooks.update_cookies(included_cookies)
+        return included_cookies

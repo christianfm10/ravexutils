@@ -10,8 +10,7 @@ from http.cookies import SimpleCookie
 import logging
 from typing import Any, cast
 
-from aiohttp import CookieJar
-from shared_lib.baseclient.aiohttp_client import BaseAioHttpClient
+from shared_lib.baseclient.aiohttp_client import BaseAioHttpClient, _FixedCookieJar
 from yarl import URL
 
 from axiom.urls import AAllBaseUrls, AxiomTradeApiUrls
@@ -22,7 +21,7 @@ from axiom.urls import AAllBaseUrls, AxiomTradeApiUrls
 # ---------------------------------------------------------------------------
 
 _ORIGIN = "https://axiom.trade"
-_API_HOST = "api6.axiom.trade"
+_API_HOST = "api8.axiom.trade"
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -76,8 +75,8 @@ class AxiomClient(BaseAioHttpClient):
         Extra keyword arguments forwarded to :class:`BaseAioHttpClient`.
     """
 
-    BASE_URL: str = AAllBaseUrls.BASE_URL_v6
-    SESSION_FILE: str = "session.dat"
+    BASE_URL: str = AAllBaseUrls.BASE_URL_v8
+    SESSION_FILE: str = "session3.dat"
     _ORIGIN: str = _ORIGIN
 
     def __init__(
@@ -110,16 +109,16 @@ class AxiomClient(BaseAioHttpClient):
         self,
         auth_access_token: str | None,
         auth_refresh_token: str | None,
-    ) -> CookieJar:
+    ) -> _FixedCookieJar:
         """Return a :class:`CookieJar` pre-loaded with Axiom auth cookies.
 
         Only cookies whose values are not *None* are added.
         """
-        jar = CookieJar()
+        jar = _FixedCookieJar()
         cookie = SimpleCookie()
 
         tokens = {
-            "auth-access-token": auth_access_token,
+            # "auth-access-token": auth_access_token,
             "auth-refresh-token": auth_refresh_token,
         }
 
@@ -168,7 +167,8 @@ class AxiomClient(BaseAioHttpClient):
             ):
                 # Persist the live session jar (which holds cookies updated by
                 # the server response), not the jar we built at startup.
-                cast(CookieJar, self.session.cookie_jar).save(self.SESSION_FILE)
+                self.logger.info("Saving refreshed tokens to %s", self.SESSION_FILE)
+                cast(_FixedCookieJar, self.session.cookie_jar).save(self.SESSION_FILE)
                 self.logger.info("Tokens refreshed successfully")
                 return True
 
@@ -201,10 +201,13 @@ class AxiomClient(BaseAioHttpClient):
             When the session has fully expired and a new login is required.
         """
         cookies = self._filtered_cookies()
+
         if "auth-access-token" in cookies:
             return True
         if "auth-refresh-token" not in cookies:
-            raise RuntimeError("Session expired. A new login is required.")
+            self.logger.error("No authentication tokens available. Please log in.")
+            return False
+        self.logger.warning("Access token expired. Attempting to refresh …")
         return await self.refresh_tokens()
 
     # ------------------------------------------------------------------
@@ -230,8 +233,9 @@ class AxiomClient(BaseAioHttpClient):
         ValueError
             When authentication cannot be established.
         """
+
         if not await self.ensure_authenticated():
-            raise ValueError(
+            raise RuntimeError(
                 "Authentication failed. Please provide valid tokens or log in."
             )
         self.logger.debug("Cookies: %s", self._filtered_cookies())
@@ -287,3 +291,53 @@ class AxiomClient(BaseAioHttpClient):
         except Exception as exc:
             self.logger.error("Error fetching developer tokens: %s", exc)
             raise Exception(f"Failed to get developer tokens: {exc}") from exc
+
+    async def get_user_portfolio(self) -> dict[str, Any]:
+        """## Get User Portfolio
+
+        Retrieve the authenticated user's portfolio information including holdings,
+        positions, and balances.
+
+        ### Returns
+
+        - `Dict[str, Any]`: Portfolio information from the API
+
+        ### Raises
+
+        - `ValueError`: If authentication fails
+        - `httpx.HTTPStatusError`: If the API request fails
+        - `Exception`: For other errors during the request
+
+        ### Example
+
+        ```python
+        client = AxiomTradeClient(username="user@example.com", password="password")
+        client.login()
+
+        # Get portfolio
+        portfolio = client.get_user_portfolio()
+        print(f"Total value: ${portfolio['totalValue']}")
+        print(f"Holdings: {len(portfolio['holdings'])} tokens")
+
+        for holding in portfolio['holdings']:
+            print(f"- {holding['symbol']}: {holding['amount']} tokens")
+        ```
+        """
+        self.logger.debug("Fetching my portfolio")
+        try:
+            payload = {}
+            # TODO: The API seems to require a payload for this endpoint, but the docs don't specify what it should contain. The following is based on observed traffic and may need adjustments.
+            # payload = {
+            #     "walletAddressRaw": "MyAddresss",
+            #     "isOtherWallet": False,
+            #     "tokenAddressToAmountMap": {
+            #         "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263": 1982722336,
+            #         "9uGU1v6HhKugg93rx1YjNV8CbCxYB7UhrvfKPEdEAVfM": 11801446167,
+            #     },
+            #     "userSolBalance": 0.007297883,
+            #     "v": 1772913021691,
+            # }
+            return await self._post("/portfolio-fast-active-v2", payload=payload)
+        except Exception as exc:
+            self.logger.error(f"Error fetching my portfolio: {exc}")
+            raise Exception(f"Failed to get portfolio: {exc} ") from exc

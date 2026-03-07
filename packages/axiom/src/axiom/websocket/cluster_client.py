@@ -44,7 +44,6 @@ from shared_lib.utils.notification import show_alert
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
-    from axiom.auth.auth_manager import AuthManager
 
 # WebSocket URL for Axiom cluster
 WS_CLUSTER_URL = "wss://cluster3.axiom.trade/"
@@ -77,7 +76,7 @@ class AxiomClusterWSClient(WebSocketClient):
 
     HEADERS = {
         "Origin": "https://axiom.trade",
-        "Host": "cluster3.axiom.trade",
+        # "Host": "cluster3.axiom.trade",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
