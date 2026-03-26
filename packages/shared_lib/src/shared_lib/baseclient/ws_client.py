@@ -477,10 +477,16 @@ class WebSocketClient(ABC):
 
                 # If connection closed normally (e.g., server closed cleanly), exit loop
                 # Don't reconnect on clean close
-                if self.ws.close_code in (1000, 1001):  # Normal closure codes
+                if self.ws.close_code in ([1000]):  # Normal closure codes
                     self.logger.info("Clean connection close - not reconnecting")
                     break
-                if self.ws.close_code in (1006, None):  # Abnormal closure or no code
+                if self.ws.close_code in (
+                    [
+                        1001,
+                        1006,
+                        None,
+                    ]
+                ):  # Abnormal closure or no code
                     self.logger.warning(
                         "Abnormal connection close - attempting reconnection"
                     )

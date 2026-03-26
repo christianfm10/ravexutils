@@ -108,6 +108,7 @@ class BaseAioHttpClient(ABC):
         ecdh_curve: str | None = None,
         cipher_suite: str | None = None,
         load_cookies: bool = False,
+        init_session: bool = True,
         **kwargs: Any,
     ):
         """
@@ -207,21 +208,52 @@ class BaseAioHttpClient(ABC):
         # Merge with user-provided headers
         user_headers = kwargs.pop("headers", {})
         headers = {**default_headers, **user_headers}
-
+        self.headers = headers
+        self.timeout_config = timeout_config
+        self.connector = connector
+        self.kwargs = kwargs
+        self.cookie_jar = cookie_jar
+        self.kwargs = kwargs
         # Initialize aiohttp session
-        self.session = aiohttp.ClientSession(
-            cookies=self.cookies,
-            headers=headers,
-            timeout=timeout_config,
-            connector=connector,
-            cookie_jar=cookie_jar,
-            **kwargs,
-        )
+        if init_session:
+            self.session = aiohttp.ClientSession(
+                cookies=self.cookies,
+                headers=headers,
+                timeout=timeout_config,
+                connector=connector,
+                cookie_jar=cookie_jar,
+                **kwargs,
+            )
 
         # Store proxy for use in requests
         self._proxy_url = proxy_url
 
         logger.info(f"AioHttp client initialized with base URL: {self.base_url}")
+
+    async def init_session(self) -> None:
+        """
+        Perform any asynchronous initialization tasks.
+
+        This method can be overridden by subclasses to perform async setup
+        that cannot be done in __init__. For example, it can be used to
+        verify proxy connectivity or load additional data after the session
+        is created.
+
+        Example:
+            >>> async def init_client(self):
+            ...     # Verify proxy connectivity
+            ...     if self._proxy_url:
+            ...         await self._check_ip()
+        """
+        # Initialize aiohttp session
+        self.session = aiohttp.ClientSession(
+            cookies=self.cookies,
+            headers=self.headers,
+            timeout=self.timeout_config,
+            connector=self.connector,
+            cookie_jar=self.cookie_jar,
+            **self.kwargs,
+        )
 
     async def fetch(
         self,
