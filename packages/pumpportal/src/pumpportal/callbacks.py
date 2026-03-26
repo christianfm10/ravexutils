@@ -1,6 +1,8 @@
 import logging
 from typing import Any, TYPE_CHECKING
 
+from pumpportal.models import PumpPortalBaseModel
+
 if TYPE_CHECKING:
     from pumpportal import PumpPortalWSClient
 
@@ -33,29 +35,29 @@ def create_callbacks(ws_client: "PumpPortalWSClient"):
     await client.subscribe_migration(callbacks['migration'])
     ```
     """
-    counter = 0
     buyed_tokens: dict[str, Any] = {}
 
     async def should_skip_token(data: dict) -> bool:
         # Example logic: skip tokens with solAmount less than 1.0
         pool = data.get("pool", "")
         is_mayhem = data.get("is_mayhem_mode", False)
+        metadata_uri = data.get("uri", "")
         if pool != "pump":
+            return True
+        if metadata_uri and "ipfs.io" not in metadata_uri:
             return True
         if is_mayhem:
             return True
         return False
 
     async def new_token_callback(data: dict[str, Any]):
-        nonlocal counter
-
+        token = PumpPortalBaseModel(**data)
         if await should_skip_token(data):
             return
-
-        if counter < 3:
-            await ws_client.add_token_trade_keys(keys=[data["mint"]])
-            buyed_tokens[data["mint"]] = data["marketCapSol"]
-            counter = counter + 1
+        print(f"[PumpPortal] New Token Detected: {data}")
+        text = token.short_str()
+        logger.info(text)
+        return
 
     async def token_trade_callback(data: dict[str, Any]):
         if buyed_tokens[data["mint"]] == 0:
