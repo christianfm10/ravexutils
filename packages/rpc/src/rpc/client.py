@@ -390,7 +390,7 @@ class RPC_Client(Client):
         size_limit: int = 10,
         max_depth: int = 5,
         pages: int = 1,
-        handle_address_callback: Callable[[str], Awaitable[None]] | None = None,
+        handle_address_callback: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         """Traza el origen de los fondos de una wallet siguiendo transacciones.
 
@@ -418,6 +418,11 @@ class RPC_Client(Client):
                 break
 
             if handle_address_callback:
+                should_continue = await handle_address_callback(address)
+                if not should_continue:
+                    print("Callback requested to stop tracing.")
+                    break
+
                 await handle_address_callback(address)
 
             before = None  # Puedes implementar paginación usando el último signature de la página anterior
