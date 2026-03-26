@@ -14,3 +14,9 @@ wheels/
 examples/
 sessions/
 
+# Log
+*.log
+
+# Pickle Files
+*.pkl
+*.dat
