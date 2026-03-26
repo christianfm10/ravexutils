@@ -3,8 +3,8 @@
     "state": {
         "tables": {
             "newPairs": true,
-            "finalStretch": false,
-            "migrated": false
+            "finalStretch": true,
+            "migrated": true
         },
         "filters": {
             "newPairs": {
@@ -93,7 +93,7 @@
                     "min": null
                 },
                 "numDevPairs": {
-                    "max": 3,
+                    "max": 5,
                     "min": null
                 },
                 "bondingCurve": {
@@ -106,7 +106,7 @@
                 },
                 "mustEndInPump": false,
                 "numMigrations": {
-                    "max": 1,
+                    "max": 2,
                     "min": null
                 },
                 "twitterExists": false,
@@ -185,7 +185,7 @@
                     "bags": false,
                     "bonk": false,
                     "boop": false,
-                    "pump": false,
+                    "pump": true,
                     "heaven": false,
                     "pumpAmm": false,
                     "raydium": false,

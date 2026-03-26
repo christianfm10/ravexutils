@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 # WebSocket URL for Axiom Pulse
 # WS_PULSE_URL = "wss://pulse2.axiom.trade/ws"
-WS_PULSE_URL = "wss://pulse.axiom.trade/ws"
+WS_PULSE_URL = "wss://pulse2.axiom.trade/ws"
 
 
 def _decode_message_content(content: bytes) -> Any:

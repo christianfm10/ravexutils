@@ -21,7 +21,7 @@ from axiom.urls import AAllBaseUrls, AxiomTradeApiUrls
 # ---------------------------------------------------------------------------
 
 _ORIGIN = "https://axiom.trade"
-_API_HOST = "api8.axiom.trade"
+_API_HOST = "api6.axiom.trade"
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -75,7 +75,7 @@ class AxiomClient(BaseAioHttpClient):
         Extra keyword arguments forwarded to :class:`BaseAioHttpClient`.
     """
 
-    BASE_URL: str = AAllBaseUrls.BASE_URL_v8
+    BASE_URL: str = AAllBaseUrls.BASE_URL_v6
     SESSION_FILE: str = "session3.dat"
     _ORIGIN: str = _ORIGIN
 
@@ -159,6 +159,7 @@ class AxiomClient(BaseAioHttpClient):
 
         try:
             self.logger.info("Refreshing authentication tokens …")
+            self.session.headers.update({"Host": _API_HOST})
             response = await super()._fetch("POST", AxiomTradeApiUrls.REFRESH_TOKEN)
 
             if (
