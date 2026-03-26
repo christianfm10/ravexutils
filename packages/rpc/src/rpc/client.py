@@ -423,8 +423,6 @@ class RPC_Client(Client):
                     print("Callback requested to stop tracing.")
                     break
 
-                await handle_address_callback(address)
-
             before = None  # Puedes implementar paginación usando el último signature de la página anterior
             for page in range(pages):
                 print(
