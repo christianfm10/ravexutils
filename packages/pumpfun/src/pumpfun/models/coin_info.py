@@ -38,10 +38,10 @@ class CoinInfoResponse(APIBaseModel):
     is_currently_live: bool
     initialized: bool
     video_uri: str | None = None
-    updated_at: int | None
+    updated_at: int | None = None
     pump_swap_pool: str | None = None
     ath_market_cap: float | None = None
-    ath_market_cap_timestamp: int | None
+    ath_market_cap_timestamp: int | None = None
     banner_uri: str | None = None
     hide_banner: bool
     livestream_downrank_score: int | None = None
