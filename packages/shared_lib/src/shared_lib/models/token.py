@@ -1,6 +1,14 @@
 from pydantic import Field, BaseModel, AliasChoices
 
 
+class DevWalletFunding(BaseModel):
+    wallet_address: str = Field(..., alias="walletAddress")
+    funding_wallet_address: str = Field(..., alias="fundingWalletAddress")
+    signature: str = Field(..., alias="signature")
+    amount_sol: float = Field(..., alias="amountSol")
+    funded_at: str = Field(..., alias="fundedAt")
+
+
 class TokenItem(BaseModel):
     pair_address: str = Field(
         validation_alias=AliasChoices(
@@ -51,6 +59,7 @@ class TokenItem(BaseModel):
     created_at: str | None = None
 
     # Dev Wallet Funding
+    dev_wallet_funding: DevWalletFunding | None = None
     # funding_wallet_address: str = Field(..., alias="fundingWalletAddress")
     # funding_signature: str = Field(..., alias="signature")
     # funding_amount_sol: float = Field(..., alias="amountSol")

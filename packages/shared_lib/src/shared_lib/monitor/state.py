@@ -181,3 +181,12 @@ def init_pair_buffer(
     global pair_buffer
     pair_buffer = PairBuffer(on_ready, funder_timeout, dispatch_cleanup_delay)
     return pair_buffer
+
+
+def _buf():
+    """Return the global PairBuffer, raising if not initialized."""
+    assert pair_buffer is not None, (
+        "pair_buffer is not initialized. "
+        "Call shared_lib.monitor.state.init_pair_buffer(on_ready=...) at startup."
+    )
+    return pair_buffer

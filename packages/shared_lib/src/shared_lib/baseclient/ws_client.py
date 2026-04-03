@@ -614,6 +614,22 @@ class WebSocketClient(ABC):
 
         await self.ws.send_json(message)
 
+    async def on_disconnect(self) -> None:
+        """Handle WebSocket disconnection events.
+
+        This method can be overridden by subclasses to perform custom actions
+        when a disconnection is detected (e.g., cleanup, notifications, etc.).
+        By default, it does nothing.
+
+        ## Example Override:
+        ```python
+        async def on_disconnect(self):
+            self.logger.warning("WebSocket disconnected - performing cleanup")
+            # Custom cleanup logic here
+        ```
+        """
+        pass
+
     async def _reconnect(self) -> bool:
         """
         Attempt to reconnect to WebSocket with exponential backoff.
