@@ -1,3 +1,6 @@
+from yarl import URL
+
+
 class AAllBaseUrls:
     BASE_URL = "https://api.axiomtrade.com"
     BASE_URL_v2 = "https://api2.axiom.trade"
@@ -10,6 +13,15 @@ class AAllBaseUrls:
     BASE_URL_v9 = "https://api9.axiom.trade"
     BASE_URL_v10 = "https://api10.axiom.trade"
     BASE_URL_MAIN = "https://api.axiom.trade"
+
+
+class AxiomBaseUrls:
+    BASE_URL = URL("https://axiom.trade")
+
+
+class WSBaseUrls:
+    WS_CLUSTER_URL = URL("wss://cluster3.axiom.trade/")
+    WS_PULSE_URL = URL("wss://pulse2.axiom.trade/ws")
 
 
 class AxiomTradeApiUrls:

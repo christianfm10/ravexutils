@@ -41,12 +41,13 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
+from ..urls import WSBaseUrls, AxiomBaseUrls
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
 
 # WebSocket URL for Axiom cluster
-WS_CLUSTER_URL = "wss://cluster3.axiom.trade/"
+WS_CLUSTER_URL = WSBaseUrls.WS_CLUSTER_URL
 
 # Room/channel names for WebSocket subscriptions
 ROOM_NEW_PAIRS = "new_pairs"
@@ -75,8 +76,8 @@ class AxiomClusterWSClient(WebSocketClient):
     """
 
     HEADERS = {
-        "Origin": "https://axiom.trade",
-        # "Host": "cluster3.axiom.trade",
+        "Origin": str(AxiomBaseUrls.BASE_URL),
+        "Host": WS_CLUSTER_URL.host,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
@@ -107,7 +108,7 @@ class AxiomClusterWSClient(WebSocketClient):
         # Call parent constructor
         super().__init__(
             log_level=log_level,
-            ws_url=WS_CLUSTER_URL,
+            ws_url=str(WS_CLUSTER_URL),
             telegram_bot=telegram_bot,
             client=client,
         )
