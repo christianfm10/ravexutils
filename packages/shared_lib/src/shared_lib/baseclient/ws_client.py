@@ -5,11 +5,11 @@ import aiohttp
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
-from axiom.client import AxiomClient
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
     from shared_lib.client_context import ClientContext
+    from axiom.client import AxiomClient
 
 WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
 
