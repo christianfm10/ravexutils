@@ -124,17 +124,20 @@ class PumpPortalWSClient(WebSocketClient):
         ```
         """
         # Handle direct room matches
-        if room == ROOM_NEW_TOKEN and ROOM_NEW_TOKEN in self._callbacks:
-            await self._callbacks[ROOM_NEW_TOKEN](data)
+        if room == ROOM_NEW_TOKEN and ROOM_NEW_TOKEN in self._active_subscriptions:
+            await self._active_subscriptions[ROOM_NEW_TOKEN]["callback"](data)
             return
-        if room == ROOM_MIGRATION and ROOM_MIGRATION in self._callbacks:
-            await self._callbacks[ROOM_MIGRATION](data)
+        if room == ROOM_MIGRATION and ROOM_MIGRATION in self._active_subscriptions:
+            await self._active_subscriptions[ROOM_MIGRATION]["callback"](data)
             return
-        if room == ROOM_TOKEN_TRADE and ROOM_TOKEN_TRADE in self._callbacks:
-            await self._callbacks[ROOM_TOKEN_TRADE](data)
+        if room == ROOM_TOKEN_TRADE and ROOM_TOKEN_TRADE in self._active_subscriptions:
+            await self._active_subscriptions[ROOM_TOKEN_TRADE]["callback"](data)
             return
-        if room == ROOM_ACCOUNT_TRADE and ROOM_ACCOUNT_TRADE in self._callbacks:
-            await self._callbacks[ROOM_ACCOUNT_TRADE](data)
+        if (
+            room == ROOM_ACCOUNT_TRADE
+            and ROOM_ACCOUNT_TRADE in self._active_subscriptions
+        ):
+            await self._active_subscriptions[ROOM_ACCOUNT_TRADE]["callback"](data)
             return
 
     async def _message_handler(self, message: str) -> None:

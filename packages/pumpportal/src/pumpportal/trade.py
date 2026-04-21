@@ -1,8 +1,9 @@
 import os
 import httpx
 
-PUMP_API_KEY = os.getenv("PUMP_API_KEY")
-PUMP_PORTAL = f"https://pumpportal.fun/api/trade?api-key={PUMP_API_KEY}"
+PUMPPORTAL_API_KEY = os.getenv("PUMPPORTAL_API_KEY")
+MY_PK = os.getenv("MY_PK")
+PUMP_PORTAL = f"https://pumpportal.fun/api/trade?api-key={PUMPPORTAL_API_KEY}"
 
 
 class PumpPortalError(Exception):
