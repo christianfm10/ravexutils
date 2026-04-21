@@ -6,9 +6,11 @@ Implements the generic WebSocketClient interface with Solana JSON-RPC 2.0 protoc
 
 import logging
 import json
+import os
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
+from .models import RPCTransactionSubscription
 
 if TYPE_CHECKING:
     from shared_lib.client_context import ClientContext
@@ -63,6 +65,12 @@ class SolanaRPCWSClient(WebSocketClient):
         - `ws_url` (str): Solana RPC WebSocket URL
         - `**kwargs`: Additional parameters passed to WebSocketClient
         """
+
+        rpc_ws_url = os.getenv("RPC_WS_URL")
+        rpc_api_key = os.getenv("RPC_API_KEY")
+        if rpc_ws_url and rpc_api_key:
+            ws_url = f"{rpc_ws_url}?api-key={rpc_api_key}"
+            logging.info(f"Using RPC URL from environment: {ws_url}")
         super().__init__(context=context, ws_url=ws_url, **kwargs)
         self.logger = logging.getLogger("SolanaRPCWSClient")
         self._request_id = 0
@@ -97,7 +105,13 @@ class SolanaRPCWSClient(WebSocketClient):
         - `dict`: JSON-RPC 2.0 formatted message
         """
         params = kwargs.get("params", [])
-        request_id = self._get_next_id()
+        method, request_id = method.split("|") if "|" in method else (method, None)
+        if not request_id:
+            self.logger.warning(
+                "Method name does not contain request ID. Consider using method|request_id format for better tracking."
+            )
+            request_id = self._get_next_id()
+        # request_id = self._get_next_id()
 
         return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
 
@@ -110,25 +124,25 @@ class SolanaRPCWSClient(WebSocketClient):
             "jsonrpc": "2.0",
             "id": 2,
             "method": "accountUnsubscribe",
-            "params": [subscription_id]
+            "params": subscription_ids
         }
         ```
 
         ## Args:
         - `method` (str): RPC unsubscribe method (e.g., "accountUnsubscribe")
-        - `**kwargs`: Contains 'subscription_id' for the subscription to cancel
+        - `**kwargs`: Contains 'subscription_ids' for the subscriptions to cancel
 
         ## Returns:
         - `dict`: JSON-RPC 2.0 formatted unsubscribe message
         """
-        subscription_id = kwargs.get("subscription_id")
+        subscription_ids = kwargs.get("subscription_ids")
         request_id = self._get_next_id()
 
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
-            "params": [subscription_id],
+            "params": subscription_ids,
         }
 
     async def _message_handler(self, message: str) -> None:
@@ -144,6 +158,8 @@ class SolanaRPCWSClient(WebSocketClient):
         if "result" in data and "id" in data:
             subscription_id: int = data["result"]
             request_id = data["id"]
+            method_id = f"{data.get('method', 'unknown')}|{request_id}"
+            self._active_subscriptions[method_id]["subscription_id"] = subscription_id
             self.logger.info(
                 f"Subscription confirmed: ID={subscription_id}, RequestID={request_id}"
             )
@@ -154,11 +170,14 @@ class SolanaRPCWSClient(WebSocketClient):
             method: str = data["method"]
             params = data["params"]
             method = method.replace("Notification", "Subscribe")
-            callback = self._active_subscriptions.get(method, {}).get("callback")
+            method_id = f"{method}|{data.get('id', 'unknown')}"
+            callback = self._active_subscriptions.get(method_id, {}).get("callback")
             if callback:
                 await callback(params)
             else:
-                self.logger.warning(f"No callback registered for subscription {method}")
+                self.logger.warning(
+                    f"No callback registered for subscription {method_id}"
+                )
             return
 
             # Extract subscription ID and result
@@ -307,6 +326,89 @@ class SolanaRPCWSClient(WebSocketClient):
         }
         return await self.subscribe_method(method, callback, params=[])
 
+    async def subscribe_transaction(
+        self,
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
+        account_include: list[str] | None = None,
+        account_exclude: list[str] | None = None,
+        account_required: list[str] | None = None,
+        vote: bool | None = None,
+        failed: bool | None = None,
+        signature: str | None = None,
+        commitment: str = "confirmed",
+        encoding: str = "jsonParsed",
+        transaction_details: str = "full",
+        show_rewards: bool = True,
+        max_supported_transaction_version: int = 0,
+        request_id: int | None = None,
+    ) -> bool:
+        """Subscribe to real-time transaction events with custom filters (Helius Enhanced WebSocket).
+
+        ## Args:
+        - `callback`: Async function to handle transaction notifications
+        - `account_include`: Accounts to receive updates for (tx must include at least one). Up to 50,000.
+        - `account_exclude`: Accounts to exclude from updates. Up to 50,000.
+        - `account_required`: Accounts that must all be included in a tx. Up to 50,000.
+        - `vote`: Include or exclude vote-related transactions
+        - `failed`: Include or exclude failed transactions
+        - `signature`: Filter to a specific transaction signature
+        - `commitment`: Commitment level ("processed", "confirmed", "finalized")
+        - `encoding`: Encoding format ("base58", "base64", "jsonParsed")
+        - `transaction_details`: Detail level ("full", "signatures", "accounts", "none")
+        - `show_rewards`: Whether to include reward data
+        - `max_supported_transaction_version`: Highest tx version to receive (0 = legacy + versioned)
+
+        ## Returns:
+        - `bool`: True if subscription successful
+
+        ## Example:
+        ```python
+        await client.subscribe_transaction(
+            callback=on_transaction,
+            account_include=["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"],
+            commitment="processed",
+            encoding="jsonParsed",
+            transaction_details="full",
+        )
+        ```
+        """
+        method = "transactionSubscribe"
+
+        # Build filter object
+        tx_filter: dict[str, Any] = {}
+        if account_include is not None:
+            tx_filter["accountInclude"] = account_include
+        if account_exclude is not None:
+            tx_filter["accountExclude"] = account_exclude
+        if account_required is not None:
+            tx_filter["accountRequired"] = account_required
+        if vote is not None:
+            tx_filter["vote"] = vote
+        if failed is not None:
+            tx_filter["failed"] = failed
+        if signature is not None:
+            tx_filter["signature"] = signature
+
+        # Build options object
+        options: dict[str, Any] = {
+            "commitment": commitment,
+            "encoding": encoding,
+            "transactionDetails": transaction_details,
+            "showRewards": show_rewards,
+            "maxSupportedTransactionVersion": max_supported_transaction_version,
+        }
+        request_id = self._get_next_id() if request_id is None else request_id
+        method_id = f"{method}|{request_id}"
+
+        params = [tx_filter, options]
+        self._active_subscriptions[method] = {
+            # "method": method,
+            "callback": callback,
+            "params": params,
+            # "id": request_id,
+        }
+        return await self.subscribe_method(method, callback, params=params)
+
 
 # Global singleton instance
-solana_rpc_ws_client = SolanaRPCWSClient()
+# solana_rpc_ws_client = SolanaRPCWSClient()

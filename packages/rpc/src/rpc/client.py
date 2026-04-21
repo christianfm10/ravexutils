@@ -1,5 +1,7 @@
 """Cliente RPC para interactuar con la blockchain de Solana."""
 
+import os
+import logging
 from typing import Any, Awaitable, Callable, Literal
 
 from shared_lib.baseclient import Client
@@ -61,6 +63,13 @@ class RPC_Client(Client):
             >>> # Con timeout personalizado
             >>> client = RPC_Client(timeout=60.0)
         """
+
+        rpc_url = os.getenv("RPC_URL")
+        rpc_api_key = os.getenv("RPC_API_KEY")
+        if rpc_url and rpc_api_key:
+            ws_url = f"{rpc_url}?api-key={rpc_api_key}"
+            base_url = f"{rpc_url}?api-key={rpc_api_key}"
+            logging.info(f"Using RPC URL from environment: {ws_url}")
         super().__init__(base_url=base_url, timeout=timeout)
 
     async def get_token_accounts(
@@ -386,7 +395,7 @@ class RPC_Client(Client):
     async def trace_wallet_origin(
         self,
         address: str,
-        goal_address: str | None = None,
+        goal_address: str | list | None = None,
         size_limit: int = 10,
         max_depth: int = 5,
         pages: int = 1,
@@ -410,8 +419,8 @@ class RPC_Client(Client):
 
         for hop in range(max_depth):
             print(f"Hop {hop + 1}: Address {address}")
-            if goal_address and address == goal_address:
-                print(f"Reached goal address: {goal_address}")
+            if goal_address and address in goal_address:
+                print(f"Reached goal address: {address}")
                 break
             if address in CEXs:
                 print(f"Reached known CEX address: {address}")

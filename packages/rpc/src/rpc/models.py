@@ -347,3 +347,39 @@ class RPCGetSignaturesForAddressResult(APIBaseModel):
     """
 
     signatures: list[RPCSignatureInfo] = Field(default_factory=list)
+
+
+# -----------------------------------GetTransactionSubscription Models-----------------------------------#
+class RPCMessageWS(APIBaseModel):
+    """Modelo para el campo `message` dentro del resultado de una suscripción a transacciones."""
+
+    account_keys: list[str | dict] = Field(..., alias="accountKeys")
+
+
+class RPCTransactionWS(APIBaseModel):
+    """Modelo para el campo `transaction` dentro del resultado de getTransaction."""
+
+    account_keys: list[str | dict] = Field(..., alias="accountKeys")
+
+
+class RPCTxn(APIBaseModel):
+    """Modelo para el campo `transaction` dentro del resultado de una suscripción a transacciones."""
+
+    transaction: RPCTransactionWS
+    meta: RPCMetaTransaction
+
+
+class RPCTransactionSubscriptionResult(APIBaseModel):
+    transaction: RPCTxn
+
+
+class RPCTransactionSubscription(APIBaseModel):
+    """Resultado de una notificación de transacción por suscripción.
+
+    Attributes:
+        subscription: ID de la suscripción
+        result: Resultado de la transacción (similar a getTransaction)
+    """
+
+    subscription: int
+    result: RPCTransactionSubscriptionResult
