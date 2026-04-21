@@ -1,8 +1,8 @@
 from datetime import datetime
 
 from shared_lib.database.base import Base
-from sqlalchemy import Index, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import ForeignKey, Index, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 class UserCreatedCoinDB(Base):
@@ -24,9 +24,12 @@ class UserCreatedCoinDB(Base):
     banner_uri: Mapped[str | None]
     website: Mapped[str | None]
     twitter: Mapped[str | None]
+    telegram: Mapped[str | None]
     metadata_uri: Mapped[str | None]
     init_price: Mapped[float | None]
     is_active: Mapped[bool | None]
+    is_cashback_enabled: Mapped[bool | None]
+    migration_timestamp: Mapped[int | None]
 
     # Timestamps
     inserted_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -44,3 +47,20 @@ class UserCreatedCoinDB(Base):
             f"<UserCreatedCoinDB(mint={self.mint}, "
             f"name={self.name}, symbol={self.symbol}, creator={self.creator})>"
         )
+
+
+class Funder(Base):
+    __tablename__ = "funder"
+
+    txn: Mapped[str] = mapped_column(primary_key=True)
+    funder: Mapped[str]
+    amount: Mapped[float | None]
+    block_time: Mapped[int | None]
+    dev_pk: Mapped[str] = mapped_column(
+        ForeignKey("user_created_coins.mint"), nullable=False
+    )
+
+    dev: Mapped["UserCreatedCoinDB"] = relationship("UserCreatedCoinDB")
+
+    def __repr__(self) -> str:
+        return f"<Funder txn={self.txn} funder={self.funder} dev_pk={self.dev_pk}>"

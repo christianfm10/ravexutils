@@ -16,6 +16,8 @@ class UserCreatedCoin(APIBaseModel):
     description: str | None = None
     website: str | None = None
     twitter: str | None = None
+    telegram: str | None = None
+    is_cashback_enabled: bool | None = None
     metadata_uri: str | None = None
 
 

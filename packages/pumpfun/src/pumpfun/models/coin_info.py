@@ -38,7 +38,7 @@ class CoinInfoResponse(APIBaseModel):
     is_currently_live: bool
     initialized: bool
     video_uri: str | None = None
-    updated_at: int | None = None
+    # updated_at: int | None = None
     pump_swap_pool: str | None = None
     ath_market_cap: float | None = None
     ath_market_cap_timestamp: int | None = None
@@ -47,21 +47,22 @@ class CoinInfoResponse(APIBaseModel):
     livestream_downrank_score: int | None = None
     usd_market_cap: float
     mayhem_state: int | None = None  # 1= active, 2 = completed
+    is_cashback_enabled: bool | None = None
 
-    @model_serializer
-    def serializar(self):
-        return {
-            "mint": self.mint,
-            "name": self.name,
-            "symbol": self.symbol,
-            "description": self.description,
-            "metadata_uri": self.metadata_uri,
-            "twitter": self.twitter,
-            "telegram": self.telegram,
-            "creator": self.creator,
-            "created_timestamp": self.created_timestamp,
-            "website": self.website,
-            "pump_swap_pool": self.pump_swap_pool,
-            "ath_market_cap": self.ath_market_cap,
-            "ath_market_cap_timestamp": self.ath_market_cap_timestamp,
-        }
+    # @model_serializer
+    # def serializar(self):
+    #     return {
+    #         "mint": self.mint,
+    #         "name": self.name,
+    #         "symbol": self.symbol,
+    #         "description": self.description,
+    #         "metadata_uri": self.metadata_uri,
+    #         "twitter": self.twitter,
+    #         "telegram": self.telegram,
+    #         "creator": self.creator,
+    #         "created_timestamp": self.created_timestamp,
+    #         "website": self.website,
+    #         "pump_swap_pool": self.pump_swap_pool,
+    #         "ath_market_cap": self.ath_market_cap,
+    #         "ath_market_cap_timestamp": self.ath_market_cap_timestamp,
+    #     }
