@@ -146,7 +146,7 @@ class BaseAioHttpClient(ABC):
 
         # Load Cookies
         cookie_jar: _FixedCookieJar | None = kwargs.pop("cookie_jar", None)
-        if load_cookies:
+        if init_session and load_cookies:
             session_path = Path(self.SESSION_FILE)
             if session_path.exists():
                 cookie_jar = _FixedCookieJar()
@@ -183,7 +183,7 @@ class BaseAioHttpClient(ABC):
 
         # Configure TLS fingerprinting if requested
         connector = kwargs.pop("connector", None)
-        if use_tls_fingerprint:
+        if init_session and use_tls_fingerprint:
             if connector is None:
                 ssl_context = create_tls_context(
                     ecdh_curve=ecdh_curve,
@@ -245,13 +245,28 @@ class BaseAioHttpClient(ABC):
             ...     if self._proxy_url:
             ...         await self._check_ip()
         """
+        ssl_context = create_tls_context(
+            ecdh_curve=None,
+            cipher_suite=None,
+        )
+        connector = TCPConnector(ssl=ssl_context)
+
+        session_path = Path(self.SESSION_FILE)
+        if session_path.exists():
+            cookie_jar = _FixedCookieJar()
+            cookie_jar.load(session_path)
+            logger.debug("Cookies loaded from %s", session_path)
+        else:
+            raise ConfigurationError(
+                f"Session file {session_path} not found for loading cookies"
+            )
         # Initialize aiohttp session
         self.session = aiohttp.ClientSession(
             cookies=self.cookies,
             headers=self.headers,
             timeout=self.timeout_config,
-            connector=self.connector,
-            cookie_jar=self.cookie_jar,
+            connector=connector,
+            cookie_jar=cookie_jar,
             **self.kwargs,
         )
 
