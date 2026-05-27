@@ -108,7 +108,7 @@ class BaseAioHttpClient(ABC):
         ecdh_curve: str | None = None,
         cipher_suite: str | None = None,
         load_cookies: bool = False,
-        init_session: bool = True,
+        defer_session: bool = False,
         **kwargs: Any,
     ):
         """
@@ -123,6 +123,11 @@ class BaseAioHttpClient(ABC):
             use_tls_fingerprint: Enable browser-like TLS fingerprinting.
             ecdh_curve: ECDH curve for TLS. Defaults to "secp384r1".
             cipher_suite: Custom cipher suite. Uses browser-like suite by default.
+            load_cookies: Load cookies from SESSION_FILE on session creation.
+            defer_session: If True, skip session creation in __init__. Call
+                           ``await init_session()`` manually once inside an event
+                           loop. Required when instantiating outside an async
+                           context (e.g. TCPConnector and CookieJar need a loop).
             **kwargs: Additional arguments passed to aiohttp.ClientSession.
                      Common options include:
                      - headers: Custom headers dict
@@ -133,10 +138,13 @@ class BaseAioHttpClient(ABC):
         Raises:
             ConfigurationError: If proxy or configuration is invalid.
         """
-        # Store configuration
         self.proxy = proxy
         self.clearance = cf_clearance
         self.base_url = base_url or self.BASE_URL
+        self._use_tls_fingerprint = use_tls_fingerprint
+        self._ecdh_curve = ecdh_curve
+        self._cipher_suite = cipher_suite
+        self._load_cookies = load_cookies
 
         # Initialize cookies
         self.cookies: dict[str, str] = {}
@@ -144,149 +152,106 @@ class BaseAioHttpClient(ABC):
             self.cookies["cf_clearance"] = self.clearance
             logger.debug("Cloudflare clearance cookie configured")
 
-        # Load Cookies
-        cookie_jar: _FixedCookieJar | None = kwargs.pop("cookie_jar", None)
-        if init_session and load_cookies:
-            session_path = Path(self.SESSION_FILE)
-            if session_path.exists():
-                cookie_jar = _FixedCookieJar()
-                cookie_jar.load(session_path)
-                logger.debug("Cookies loaded from %s", session_path)
-            else:
-                if cookie_jar and "auth-refresh-token" in cookie_jar.filter_cookies(
-                    self._origin_url
-                ):
-                    logger.warning(
-                        "Session file %s not found – starting with empty jar, trying using cookies from provided cookie_jar",
-                        session_path,
-                    )
-                else:
-                    raise ConfigurationError(
-                        f"Session file {session_path} not found for loading cookies"
-                    )
-        # Configure proxy if provided
-        proxy_url = None
-        if self.proxy is not None:
-            try:
-                # Handle proxy format
-                proxy_url = (
-                    self.proxy
-                    if self.proxy.startswith("http")
-                    else f"http://{self.proxy}"
-                )
-                logger.debug(f"Proxy configured: {proxy_url}")
-            except Exception as e:
-                raise ConfigurationError(f"Invalid proxy configuration: {e}") from e
+        # Store user-provided cookie_jar; actual loading happens in _load_cookie_jar()
+        self.cookie_jar: _FixedCookieJar | None = kwargs.pop("cookie_jar", None)
 
-        # Configure timeout
-        timeout_config = ClientTimeout(total=timeout)
+        # Configure proxy
+        self._proxy_url: str | None = None
+        if proxy is not None:
+            self._proxy_url = proxy if proxy.startswith("http") else f"http://{proxy}"
+            logger.debug("Proxy configured: %s", self._proxy_url)
 
-        # Configure TLS fingerprinting if requested
-        connector = kwargs.pop("connector", None)
-        if init_session and use_tls_fingerprint:
-            if connector is None:
-                ssl_context = create_tls_context(
-                    ecdh_curve=ecdh_curve,
-                    cipher_suite=cipher_suite,
-                )
-                connector = TCPConnector(ssl=ssl_context)
-                logger.debug("TLS fingerprinting enabled")
-            else:
-                logger.warning(
-                    "TLS fingerprinting requested but 'connector' already provided in kwargs"
-                )
-        # elif connector is None:
-        #     # Use default connector if none provided
-        #     connector = TCPConnector()
+        self.timeout_config = ClientTimeout(total=timeout)
 
-        # Set default headers
-        default_headers = {
+        # Store user-provided connector; actual creation happens in _build_connector()
+        self._user_connector: TCPConnector | None = kwargs.pop("connector", None)
+
+        # Merge default headers with user-provided headers
+        self.headers = {
             "Accept": "application/json",
             "User-Agent": "RavexClient/0.1.0",
+            **kwargs.pop("headers", {}),
         }
-
-        # Merge with user-provided headers
-        user_headers = kwargs.pop("headers", {})
-        headers = {**default_headers, **user_headers}
-        self.headers = headers
-        self.timeout_config = timeout_config
-        self.connector = connector
         self.kwargs = kwargs
-        self.cookie_jar = cookie_jar
-        self.kwargs = kwargs
-        # Initialize aiohttp session
-        if init_session:
-            self.session = aiohttp.ClientSession(
-                cookies=self.cookies,
-                headers=headers,
-                timeout=timeout_config,
-                connector=connector,
-                cookie_jar=cookie_jar,
-                **kwargs,
-            )
 
-        # Store proxy for use in requests
-        self._proxy_url = proxy_url
+        if not defer_session:
+            if load_cookies:
+                self.cookie_jar = self._load_cookie_jar()
+            self.session = self._create_session(self._build_connector())
+            logger.info("AioHttp client initialized with base URL: %s", self.base_url)
 
-        logger.info(f"AioHttp client initialized with base URL: {self.base_url}")
+    # ------------------------------------------------------------------
+    # Private session-building helpers (sync — no async resources needed)
+    # ------------------------------------------------------------------
 
-    async def init_session(self) -> None:
-        """
-        Perform any asynchronous initialization tasks.
-
-        This method can be overridden by subclasses to perform async setup
-        that cannot be done in __init__. For example, it can be used to
-        verify proxy connectivity or load additional data after the session
-        is created.
-
-        Example:
-            >>> async def init_client(self):
-            ...     # Verify proxy connectivity
-            ...     if self._proxy_url:
-            ...         await self._check_ip()
-        """
-        ssl_context = create_tls_context(
-            ecdh_curve=None,
-            cipher_suite=None,
-        )
-        connector = TCPConnector(ssl=ssl_context)
-
+    def _load_cookie_jar(self) -> _FixedCookieJar:
+        """Load cookies from SESSION_FILE or fall back to a provided jar."""
         session_path = Path(self.SESSION_FILE)
         if session_path.exists():
-            cookie_jar = _FixedCookieJar()
-            cookie_jar.load(session_path)
+            jar = _FixedCookieJar()
+            jar.load(session_path)
             logger.debug("Cookies loaded from %s", session_path)
-        else:
-            raise ConfigurationError(
-                f"Session file {session_path} not found for loading cookies"
+            return jar
+        if self.cookie_jar and "auth-refresh-token" in self.cookie_jar.filter_cookies(
+            self._origin_url
+        ):
+            logger.warning(
+                "Session file %s not found – using provided cookie_jar", session_path
             )
-        # Initialize aiohttp session
-        self.session = aiohttp.ClientSession(
+            return self.cookie_jar
+        raise ConfigurationError(
+            f"Session file {session_path} not found for loading cookies"
+        )
+
+    def _build_connector(self) -> TCPConnector | None:
+        """Create a TCPConnector with optional TLS fingerprinting."""
+        if self._user_connector is not None:
+            if self._use_tls_fingerprint:
+                logger.warning(
+                    "TLS fingerprinting requested but 'connector' already provided – ignoring"
+                )
+            return self._user_connector
+        if self._use_tls_fingerprint:
+            ssl_context = create_tls_context(
+                ecdh_curve=self._ecdh_curve,
+                cipher_suite=self._cipher_suite,
+            )
+            logger.debug("TLS fingerprinting enabled")
+            return TCPConnector(ssl=ssl_context)
+        return None
+
+    def _create_session(self, connector: TCPConnector | None) -> aiohttp.ClientSession:
+        """Instantiate the aiohttp ClientSession with the stored configuration."""
+        return aiohttp.ClientSession(
             cookies=self.cookies,
             headers=self.headers,
             timeout=self.timeout_config,
             connector=connector,
-            cookie_jar=cookie_jar,
+            cookie_jar=self.cookie_jar,
             **self.kwargs,
         )
 
-    async def fetch(
-        self,
-        method: str,
-        endpoint: str = "",
-        params: dict[str, Any] | None = None,
-        payload: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
-        **kwargs: Any,
-    ) -> aiohttp.ClientResponse:
-        return await self._fetch(
-            method,
-            endpoint,
-            params=params,
-            payload=payload,
-            headers=headers,
-            **kwargs,
-        )
+    async def init_session(self) -> None:
+        """
+        Create the aiohttp session inside a running event loop.
+
+        Must be called after ``__init__`` when ``defer_session=True``. This is
+        the recommended pattern when the client is instantiated outside an async
+        context, because resources such as ``TCPConnector`` and ``_FixedCookieJar``
+        require a running event loop.
+
+        Example::
+
+            client = MyAPIClient(defer_session=True)
+            # ... later, inside an async context ...
+            await client.init_session()
+            async with client:
+                data = await client.get_data()
+        """
+        if self._load_cookies:
+            self.cookie_jar = self._load_cookie_jar()
+        self.session = self._create_session(self._build_connector())
+        logger.info("AioHttp session initialized with base URL: %s", self.base_url)
 
     async def _fetch(
         self,
@@ -329,7 +294,9 @@ class BaseAioHttpClient(ABC):
             kwargs["proxy"] = self._proxy_url
 
         try:
-            self.session.headers.update(**{**self.session.headers, **(headers or {})})
+            if headers:
+                self.session.headers.update(headers)
+            # self.session.headers.update(**{**self.session.headers, **(headers or {})})
             logger.debug(f"{method} {url}")
             async with self.session.request(
                 method,
@@ -414,41 +381,6 @@ class BaseAioHttpClient(ABC):
             logger.error(f"Failed to parse JSON response: {e}")
             raise HTTPError(f"Invalid JSON response: {e}") from e
 
-    async def fetch_json(
-        self,
-        method: str,
-        endpoint: str = "",
-        params: dict[str, Any] | None = None,
-        payload: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """
-        Public method to perform an HTTP request and return JSON response.
-
-        This method is intended to be used by subclasses as the main way to
-        perform API requests. It simply calls _fetch_json internally.
-
-        Args:
-            method: HTTP method (GET, POST, PUT, DELETE, PATCH, etc.).
-            endpoint: API endpoint path (will be appended to BASE_URL).
-            params: Query parameters for the request.
-            payload: JSON payload for POST/PUT/PATCH requests.
-            headers: Additional headers for this specific request.
-            **kwargs: Additional arguments passed to aiohttp request method.
-
-        Returns:
-            Parsed JSON response as a dictionary.
-        """
-        return await self._fetch_json(
-            method,
-            endpoint,
-            params=params,
-            payload=payload,
-            headers=headers,
-            **kwargs,
-        )
-
     async def _get(
         self,
         endpoint: str,
@@ -466,7 +398,7 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        response = await self.fetch_json("GET", endpoint, params=params, **kwargs)
+        response = await self._fetch_json("GET", endpoint, params=params, **kwargs)
         return response
 
     async def _post(
@@ -486,7 +418,7 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        response = await self.fetch_json("POST", endpoint, payload=payload, **kwargs)
+        response = await self._fetch_json("POST", endpoint, payload=payload, **kwargs)
         return response
 
     async def _put(
@@ -506,7 +438,7 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        response = await self.fetch_json("PUT", endpoint, payload=payload, **kwargs)
+        response = await self._fetch_json("PUT", endpoint, payload=payload, **kwargs)
         return response
 
     async def _delete(
@@ -524,7 +456,7 @@ class BaseAioHttpClient(ABC):
         Returns:
             Parsed JSON response.
         """
-        response = await self.fetch_json("DELETE", endpoint, **kwargs)
+        response = await self._fetch_json("DELETE", endpoint, **kwargs)
         return response
 
     async def _check_ip(self) -> dict[str, str]:
