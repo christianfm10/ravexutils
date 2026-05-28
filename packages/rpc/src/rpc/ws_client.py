@@ -7,13 +7,20 @@ Implements the generic WebSocketClient interface with Solana JSON-RPC 2.0 protoc
 import logging
 import json
 import os
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING, Literal
+from pumpportal.trade import PUMPPORTAL_API_KEY
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
-from .models import RPCTransactionSubscription
+from yarl import URL
+from shared_lib.baseclient.endpoint import Endpoint
 
 if TYPE_CHECKING:
     from shared_lib.client_context import ClientContext
+
+
+class PumpportalEndpoint:
+    base_url = URL("wss://api.mainnet-beta.solana.com")
+    endpoint = Endpoint.from_url(url=base_url)
 
 
 class SolanaRPCWSClient(WebSocketClient):
@@ -52,6 +59,8 @@ class SolanaRPCWSClient(WebSocketClient):
     ```
     """
 
+    ENDPOINT = PumpportalEndpoint.endpoint
+
     def __init__(
         self,
         context: "ClientContext | None" = None,
@@ -69,7 +78,7 @@ class SolanaRPCWSClient(WebSocketClient):
         rpc_ws_url = os.getenv("RPC_WS_URL")
         rpc_api_key = os.getenv("RPC_API_KEY")
         if rpc_ws_url and rpc_api_key:
-            ws_url = f"{rpc_ws_url}?api-key={rpc_api_key}"
+            self.endpoint = Endpoint.from_url(f"{rpc_ws_url}?api-key={rpc_api_key}")
             logging.info(f"Using RPC URL from environment: {ws_url}")
         super().__init__(context=context, ws_url=ws_url, **kwargs)
         self.logger = logging.getLogger("SolanaRPCWSClient")
@@ -106,6 +115,7 @@ class SolanaRPCWSClient(WebSocketClient):
         """
         params = kwargs.get("params", [])
         method, request_id = method.split("|") if "|" in method else (method, None)
+
         if not request_id:
             self.logger.warning(
                 "Method name does not contain request ID. Consider using method|request_id format for better tracking."
@@ -155,29 +165,27 @@ class SolanaRPCWSClient(WebSocketClient):
         data = json.loads(message)
 
         # Handle subscription confirmation
-        if "result" in data and "id" in data:
-            subscription_id: int = data["result"]
-            request_id = data["id"]
-            method_id = f"{data.get('method', 'unknown')}|{request_id}"
-            self._active_subscriptions[method_id]["subscription_id"] = subscription_id
-            self.logger.info(
-                f"Subscription confirmed: ID={subscription_id}, RequestID={request_id}"
-            )
-            return
+        # if "result" in data and "id" in data:
+        #     subscription_id: int = data["result"]
+        #     request_id = data["id"]
+        #     method_id = f"{data.get('method', 'unknown')}|{request_id}"
+        #     self._active_subscriptions[method_id]["subscription_id"] = subscription_id
+        #     self.logger.info(
+        #         f"Subscription confirmed: ID={subscription_id}, RequestID={request_id}"
+        #     )
+        #     return
 
         # Handle subscription notification
         if "method" in data and "params" in data:
             method: str = data["method"]
             params = data["params"]
             method = method.replace("Notification", "Subscribe")
-            method_id = f"{method}|{data.get('id', 'unknown')}"
-            callback = self._active_subscriptions.get(method_id, {}).get("callback")
+            # method_id = f"{method}|{data.get('id', 'unknown')}"
+            callback = self._active_subscriptions.get(method, {}).get("callback")
             if callback:
                 await callback(params)
             else:
-                self.logger.warning(
-                    f"No callback registered for subscription {method_id}"
-                )
+                self.logger.warning(f"No callback registered for subscription {method}")
             return
 
             # Extract subscription ID and result
@@ -228,6 +236,47 @@ class SolanaRPCWSClient(WebSocketClient):
         """
         method = "accountSubscribe"
         params = [account, {"commitment": commitment, "encoding": encoding}]
+        self._active_subscriptions[method] = {
+            "callback": callback,
+            "params": params,
+        }
+        return await self.subscribe_method(method, callback, params=params)
+
+    async def subscribe_logs(
+        self,
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
+        filter: dict[str, Any] | Literal["all", "allWithVotes"] | None = None,
+        commitment: str = "confirmed",
+        mentions: str | None = None,
+    ) -> bool:
+        """Subscribe to log messages.
+
+        ## Args:
+        - `callback`: Async function to handle log messages
+        - `filter`: Optional filter for log messages
+        - `commitment`: Commitment level
+        - `mentions`: Optional mentions filter
+
+        ## Returns:
+        - `bool`: True if subscription successful
+        """
+        method = "logsSubscribe"
+        config: dict[str, Any] = {"commitment": commitment}
+
+        # Solana/Helius logsSubscribe expects params as:
+        # ["all" | "allWithVotes" | {"mentions": [<pubkey>]}, {"commitment": ...}]
+        if filter is not None:
+            log_filter: dict[str, Any] | Literal["all", "allWithVotes"] = filter
+            if mentions is not None:
+                self.logger.warning(
+                    "Both 'filter' and 'mentions' were provided. 'mentions' is ignored because 'filter' takes precedence."
+                )
+        elif mentions is not None:
+            log_filter = {"mentions": [mentions]}
+        else:
+            log_filter = "all"
+
+        params: list[Any] = [log_filter, config]
         self._active_subscriptions[method] = {
             "callback": callback,
             "params": params,
