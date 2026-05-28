@@ -30,6 +30,8 @@ class UserCreatedCoinDB(Base):
     is_active: Mapped[bool | None]
     is_cashback_enabled: Mapped[bool | None]
     migration_timestamp: Mapped[int | None]
+    pool_address: Mapped[str | None]
+    video_uri: Mapped[str | None]
 
     # Timestamps
     inserted_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -64,3 +66,22 @@ class Funder(Base):
 
     def __repr__(self) -> str:
         return f"<Funder txn={self.txn} funder={self.funder} dev_pk={self.dev_pk}>"
+
+
+class UserTradeDB(Base):
+    __tablename__ = "user_trades"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_address: Mapped[str]
+    slot: Mapped[int]
+    token_address: Mapped[str]
+    tx: Mapped[str]
+    amount_sol: Mapped[float | None]
+    price_usd: Mapped[float | None]
+    base_amount: Mapped[int | None]
+    type: Mapped[str | None]
+    is_bonding_curve: Mapped[bool]
+    timestamp: Mapped[int | None]
+
+    def __repr__(self) -> str:
+        return f"<UserTrades user_address={self.user_address} token_address={self.token_address} tx={self.tx}>"

@@ -40,6 +40,7 @@ class CoinInfoResponse(APIBaseModel):
     video_uri: str | None = None
     # updated_at: int | None = None
     pump_swap_pool: str | None = None
+    pool_address: str | None = None
     ath_market_cap: float | None = None
     ath_market_cap_timestamp: int | None = None
     banner_uri: str | None = None

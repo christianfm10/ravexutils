@@ -4,15 +4,22 @@ from shared_lib.pydantic import APIBaseModel
 
 
 class Trades(APIBaseModel):
-    slot_index_id: str = Field(..., alias="slotIndexId")
+    slot: int = Field(..., alias="slotIndexId")
     tx: str
     timestamp: str
     user_address: str = Field(..., alias="userAddress")
     type: str
     is_bonding_curve: bool = Field(..., alias="isBondingCurve")
     quote_amount: int = Field(..., alias="quoteAmount")
+    base_amount: int = Field(..., alias="baseAmount")
     price_usd: float | None = Field(..., alias="priceUSD")
     amount_sol: float | None = Field(..., alias="amountSOL")
+
+    @field_validator("slot", mode="before")
+    @classmethod
+    def get_slot(cls, v):
+        """slot_index_id from 0004209103440010650001 to 000420910344"""
+        return int(v[:12])
 
 
 class UserTradesResponse(APIBaseModel):
