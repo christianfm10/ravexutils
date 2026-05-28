@@ -6,59 +6,95 @@ using aiohttp. It includes support for proxies, custom headers, cookies, and
 Cloudflare clearance handling.
 """
 
-import pickle
+import json
 import pathlib
 import heapq
 from abc import ABC
+from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, cast
 import logging
 
 import aiohttp
 from aiohttp import ClientTimeout, CookieJar, TCPConnector
-from yarl import URL
 
+from .endpoint import Endpoint
 from .exceptions import HTTPError, ProxyError, ConfigurationError
 from .tls import create_tls_context
 
 
 class _FixedCookieJar(CookieJar):
-    """CookieJar with fixed save()/load() that persist the expiration state.
+    """Persistent CookieJar with JSON-based save/load.
 
-    The default aiohttp CookieJar.save() only pickles self._cookies, leaving
-    self._expirations and self._expire_heap empty on load, so expired cookies
-    are never removed after loading from disk.
+    The default aiohttp CookieJar.save() uses pickle (arbitrary code execution
+    risk on load) and only persists _cookies, losing expiration state. This
+    subclass:
+    - Uses JSON instead of pickle (safe against tampered session files)
+    - Also persists _expirations so expired cookies are purged after reload
 
-    This subclass also persists _expirations (absolute Unix timestamps) so the
-    heap can be fully reconstructed on load — including cookies that originally
-    only had max-age (already converted to absolute time by aiohttp).
+    Note: existing session files saved with pickle are not compatible and must
+    be deleted before using this version.
     """
 
     def save(self, file_path: Any) -> None:
-
         file_path = pathlib.Path(file_path)
-        with file_path.open(mode="wb") as f:
-            pickle.dump(
-                (self._cookies, self._expirations),
-                f,
-                pickle.HIGHEST_PROTOCOL,
-            )
+        data = {
+            # Stored as a list so tuple keys serialise cleanly as JSON arrays.
+            "cookies": [
+                {
+                    "key": list(key) if isinstance(key, tuple) else [key],
+                    "entries": {
+                        name: {
+                            "value": morsel.value,
+                            "expires": morsel["expires"],
+                            "path": morsel["path"],
+                            "comment": morsel["comment"],
+                            "domain": morsel["domain"],
+                            "max-age": morsel["max-age"],
+                            "secure": bool(morsel["secure"]),
+                            "httponly": bool(morsel["httponly"]),
+                            "version": morsel["version"],
+                            "samesite": morsel["samesite"],
+                        }
+                        for name, morsel in sc.items()
+                    },
+                }
+                for key, sc in self._cookies.items()
+            ],
+            "expirations": [
+                {"key": list(key), "when": when}
+                for key, when in self._expirations.items()
+            ],
+        }
+        with file_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f)
 
     def load(self, file_path: Any) -> None:
-
         file_path = pathlib.Path(file_path)
-        with file_path.open(mode="rb") as f:
-            data = pickle.load(f)
+        with file_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        # Support old files that only contain _cookies (plain dict)
-        if isinstance(data, tuple):
-            self._cookies, self._expirations = data
-        else:
-            self._cookies = data
-            self._expirations = {}
+        self._cookies.clear()
+        for entry in data.get("cookies", []):
+            raw_key = entry["key"]
+            # Reconstruct the original key type: tuple for multi-part keys
+            # (newer aiohttp), plain string for single-part (older aiohttp).
+            key: tuple | str = tuple(raw_key) if len(raw_key) > 1 else raw_key[0]
+            sc = SimpleCookie()
+            for name, attrs in entry["entries"].items():
+                sc[name] = attrs.get("value", "")
+                for attr, val in attrs.items():
+                    if attr != "value" and val:
+                        sc[name][attr] = val
+            self._cookies[key] = sc  # type: ignore[assignment]
 
-        # Rebuild the heap from the (absolute) expiration timestamps
-        self._expire_heap = list((when, key) for key, when in self._expirations.items())
+        self._expirations = {  # type: ignore[assignment]
+            tuple(entry["key"]): entry["when"] for entry in data.get("expirations", [])
+        }
+        self._expire_heap = [  # type: ignore[assignment]
+            (entry["when"], tuple(entry["key"]))
+            for entry in data.get("expirations", [])
+        ]
         heapq.heapify(self._expire_heap)
 
 
@@ -94,9 +130,38 @@ class BaseAioHttpClient(ABC):
         ...     user = await client.get_user(123)
     """
 
-    BASE_URL: str = "https://api.example.com"
-    _ORIGIN: str = BASE_URL
-    SESSION_FILE: str = "session.dat"
+    # Set ENDPOINT on a subclass to auto-populate BASE_URL and _ORIGIN.
+    # Example:
+    #   class MyClient(BaseAioHttpClient):
+    #       ENDPOINT = Endpoint.from_url("https://api.example.com")
+    ENDPOINT: ClassVar[Endpoint]
+
+    base_url: str = "https://api.example.com"
+    origin: str = "https://api.example.com"
+    host: str | None = "api.example.com"
+    domain: str | None = "example.com"
+    SESSION_FILE: str = "session.json"
+    session_path: Path = Path(SESSION_FILE)
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Auto-populate BASE_URL and _ORIGIN when ENDPOINT is set."""
+        super().__init_subclass__(**kwargs)
+        if cls.__name__ != "AuthAioHttpClient" and (not hasattr(cls, "ENDPOINT")):
+            raise ConfigurationError(
+                "Subclasses of BaseAioHttpClient must define an ENDPOINT class variable of type Endpoint. Example:\n\n"
+                "    class MyClient(BaseAioHttpClient):\n"
+                "        ENDPOINT = Endpoint.from_url('https://api.example.com')\n"
+            )
+            # print("ENDPOINT found in subclass:", cls.ENDPOINT)
+
+        # if "ENDPOINT" not in cls.__dict__:
+
+        cls.endpoint: Endpoint = cast(Endpoint, cls.__dict__.get("ENDPOINT", ""))
+        # if cls.endpoint is not None:
+        # cls.base_url = endpoint.base_url
+        # cls.origin = endpoint.origin
+        # cls.host = endpoint.url.host
+        # cls.domain = endpoint.domain
 
     def __init__(
         self,
@@ -140,19 +205,14 @@ class BaseAioHttpClient(ABC):
         """
         self.proxy = proxy
         self.clearance = cf_clearance
-        self.base_url = base_url or self.BASE_URL
+        self.base_url = base_url or self.endpoint.str_url
         self._use_tls_fingerprint = use_tls_fingerprint
         self._ecdh_curve = ecdh_curve
         self._cipher_suite = cipher_suite
         self._load_cookies = load_cookies
 
-        # Initialize cookies
-        self.cookies: dict[str, str] = {}
-        if self.clearance is not None:
-            self.cookies["cf_clearance"] = self.clearance
-            logger.debug("Cloudflare clearance cookie configured")
-
         # Store user-provided cookie_jar; actual loading happens in _load_cookie_jar()
+        # cf_clearance (if any) is injected into the jar at session creation time.
         self.cookie_jar: _FixedCookieJar | None = kwargs.pop("cookie_jar", None)
 
         # Configure proxy
@@ -174,6 +234,7 @@ class BaseAioHttpClient(ABC):
         }
         self.kwargs = kwargs
 
+        logger.info("Deferred session initialization: %s", defer_session)
         if not defer_session:
             if load_cookies:
                 self.cookie_jar = self._load_cookie_jar()
@@ -184,24 +245,26 @@ class BaseAioHttpClient(ABC):
     # Private session-building helpers (sync — no async resources needed)
     # ------------------------------------------------------------------
 
+    def _filtered_cookies(self) -> dict:
+        """Return the cookie dict filtered to the origin.
+
+        Always reads from ``session.cookie_jar`` so it reflects any cookies
+        set by the server during previous requests.
+        """
+        return self.session.cookie_jar.filter_cookies(self.endpoint.root_origin)
+
     def _load_cookie_jar(self) -> _FixedCookieJar:
-        """Load cookies from SESSION_FILE or fall back to a provided jar."""
+        """Load cookies from SESSION_FILE into a fresh jar."""
         session_path = Path(self.SESSION_FILE)
-        if session_path.exists():
-            jar = _FixedCookieJar()
-            jar.load(session_path)
-            logger.debug("Cookies loaded from %s", session_path)
-            return jar
-        if self.cookie_jar and "auth-refresh-token" in self.cookie_jar.filter_cookies(
-            self._origin_url
-        ):
-            logger.warning(
-                "Session file %s not found – using provided cookie_jar", session_path
+        if not session_path.exists():
+            raise ConfigurationError(
+                f"Session file '{session_path}' not found. "
+                "Save cookies first via save_cookies()."
             )
-            return self.cookie_jar
-        raise ConfigurationError(
-            f"Session file {session_path} not found for loading cookies"
-        )
+        jar = _FixedCookieJar()
+        jar.load(session_path)
+        logger.debug("Cookies loaded from %s", session_path)
+        return jar
 
     def _build_connector(self) -> TCPConnector | None:
         """Create a TCPConnector with optional TLS fingerprinting."""
@@ -222,8 +285,13 @@ class BaseAioHttpClient(ABC):
 
     def _create_session(self, connector: TCPConnector | None) -> aiohttp.ClientSession:
         """Instantiate the aiohttp ClientSession with the stored configuration."""
+        # Inject cf_clearance once at creation; from then on the jar is authoritative.
+        initial_cookies = {"cf_clearance": self.clearance} if self.clearance else None
+        if initial_cookies:
+            logger.debug("Cloudflare clearance cookie configured")
+
         return aiohttp.ClientSession(
-            cookies=self.cookies,
+            cookies=initial_cookies,
             headers=self.headers,
             timeout=self.timeout_config,
             connector=connector,
@@ -492,6 +560,22 @@ class BaseAioHttpClient(ABC):
         await self.session.close()
         logger.info("AioHttp client closed")
 
+    def save_cookies(self, path: Path | None = None) -> None:
+        """Persist the current session cookies to disk.
+
+        Args:
+            path: Destination file. Defaults to SESSION_FILE.
+
+        Raises:
+            RuntimeError: If the session has no cookie jar (defer_session=True
+                          and init_session() was never called).
+        """
+        if self.cookie_jar is None:
+            raise RuntimeError("No cookie jar available – session not yet initialized.")
+        target = path or Path(self.SESSION_FILE)
+        self.cookie_jar.save(target)
+        logger.debug("Cookies saved to %s", target)
+
     async def __aenter__(self):
         """Enable use as async context manager."""
         return self
@@ -499,8 +583,3 @@ class BaseAioHttpClient(ABC):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Ensure client is closed when exiting context."""
         await self.close()
-
-    @property
-    def _origin_url(self) -> URL:
-        """Cached :class:`~yarl.URL` for the Axiom origin."""
-        return URL(self._ORIGIN)

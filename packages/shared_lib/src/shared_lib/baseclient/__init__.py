@@ -8,9 +8,11 @@ and error handling.
 
 from .client import BaseClient as Client
 from .aiohttp_client import BaseAioHttpClient
+from .endpoint import Endpoint
 
 __version__ = "0.1.0"
 __all__ = [
     "Client",
     "BaseAioHttpClient",
+    "Endpoint",
 ]

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
 
 
+# TODO: Add support for multiple WebSocket connections (e.g., separate connection for pulse updates): Need to add and update_methods for managing multiple connections, including separate subscribe/unsubscribe methods and message handlers for each connection type. This will allow for more efficient handling of different data streams and reduce the load on a single connection.
 class WebSocketClient(ABC):
     HEADERS = {}
 
@@ -24,6 +25,7 @@ class WebSocketClient(ABC):
         ws_url: str = WS_PRIMARY_URL,
         telegram_bot: Optional["TelegramBot"] = None,
         client: Optional["AxiomClient"] = None,
+        heartbeat: int = 60,
     ) -> None:
         """
         Initialize WebSocket client with connection and notification settings.
@@ -130,6 +132,9 @@ class WebSocketClient(ABC):
         self._http_client_config = {
             "base_url": WS_PRIMARY_URL,
         }
+
+        # Timeouts
+        self._heartbeat = heartbeat
         # Session will be created when first needed
         self._session: Any = None
 
@@ -284,7 +289,7 @@ class WebSocketClient(ABC):
                     self.ws_url,
                     headers=self.HEADERS,
                     # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
-                    heartbeat=60,
+                    heartbeat=self._heartbeat,
                 )
             except RuntimeError:
                 self.logger.error(
@@ -583,6 +588,7 @@ class WebSocketClient(ABC):
         """
         # Remove callback from registry
         self._callbacks.pop(method, None)
+        self._active_subscriptions.pop(method, None)
 
         try:
             # Build protocol-specific message
