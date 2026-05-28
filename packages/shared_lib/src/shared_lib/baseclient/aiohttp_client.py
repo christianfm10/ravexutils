@@ -9,11 +9,11 @@ Cloudflare clearance handling.
 import json
 import pathlib
 import heapq
+import logging
 from abc import ABC
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, ClassVar, cast
-import logging
 
 import aiohttp
 from aiohttp import ClientTimeout, CookieJar, TCPConnector
@@ -154,9 +154,6 @@ class BaseAioHttpClient(ABC):
                 "    class MyClient(BaseAioHttpClient):\n"
                 "        ENDPOINT = Endpoint.from_url('https://api.example.com')\n"
             )
-            # print("ENDPOINT found in subclass:", cls.ENDPOINT)
-
-        # if "ENDPOINT" not in cls.__dict__:
 
         cls.endpoint: Endpoint = cast(Endpoint, cls.__dict__.get("ENDPOINT", ""))
 

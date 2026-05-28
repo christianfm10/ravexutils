@@ -3,8 +3,10 @@ import logging
 import json
 import aiohttp
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING, ClassVar, cast
 
+from .endpoint import Endpoint
+from .exceptions import ConfigurationError
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
@@ -17,6 +19,7 @@ WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
 # TODO: Add support for multiple WebSocket connections (e.g., separate connection for pulse updates): Need to add and update_methods for managing multiple connections, including separate subscribe/unsubscribe methods and message handlers for each connection type. This will allow for more efficient handling of different data streams and reduce the load on a single connection.
 class WebSocketClient(ABC):
     HEADERS = {}
+    ENDPOINT: ClassVar[Endpoint]
 
     def __init__(
         self,
@@ -109,7 +112,7 @@ class WebSocketClient(ABC):
             else (context.telegram_bot if context else None)
         )
 
-        self.ws_url = ws_url
+        self.ws_url = self.endpoint.str_url
         self.ws: Any = None  # Main WebSocket for regular channels
         self._callbacks: dict[str, Callable[[dict[str, Any]], Awaitable[None]]] = {}
         # Setup logger for debugging and monitoring
@@ -118,7 +121,7 @@ class WebSocketClient(ABC):
 
         # Reconnection configuration
         self._max_reconnect_attempts = 5
-        self._reconnect_delay_seconds = 5
+        self._reconnect_delay_seconds = 5.0
         self._is_reconnecting = False
         #
         # Store subscriptions for reconnection
@@ -129,14 +132,27 @@ class WebSocketClient(ABC):
 
         # Store HTTP client or configuration for lazy initialization
         self._http_client = client
-        self._http_client_config = {
-            "base_url": WS_PRIMARY_URL,
-        }
+        # self._http_client_config = {
+        #     "base_url": WS_PRIMARY_URL,
+        # }
 
         # Timeouts
         self._heartbeat = heartbeat
         # Session will be created when first needed
         self._session: Any = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Auto-populate BASE_URL and _ORIGIN when ENDPOINT is set."""
+        super().__init_subclass__(**kwargs)
+        if not hasattr(cls, "ENDPOINT"):
+            print(cls.__name__)
+            raise ConfigurationError(
+                "Subclasses of WebSocketClient must define an ENDPOINT class variable of type Endpoint. Example:\n\n"
+                "    class MyClient(WebSocketClient):\n"
+                "        ENDPOINT = Endpoint.from_url('wss://api.example.com')\n"
+            )
+
+        cls.endpoint: Endpoint = cast(Endpoint, cls.__dict__.get("ENDPOINT", ""))
 
     async def start(self) -> None:
         """
@@ -274,7 +290,9 @@ class WebSocketClient(ABC):
             session = await self._ensure_session()
 
             # Attempt WebSocket connection using aiohttp
-            self.logger.info(f"Attempting to connect to WebSocket: {self.ws_url}")
+            self.logger.info(
+                f"Attempting to connect to WebSocket: {self.endpoint.str_url}"
+            )
             try:
                 if (
                     self._http_client is not None
@@ -286,7 +304,7 @@ class WebSocketClient(ABC):
                     return False
 
                 self.ws = await session.ws_connect(
-                    self.ws_url,
+                    self.endpoint.str_url,
                     headers=self.HEADERS,
                     # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
                     heartbeat=self._heartbeat,
@@ -296,7 +314,7 @@ class WebSocketClient(ABC):
                     "WebSocket connection failed: RuntimeError (possibly due to invalid URL or network issues)"
                 )
                 return False
-            self.logger.info(f"✅ Connected to {self.ws_url} server")
+            self.logger.info(f"✅ Connected to {self.endpoint.str_url} server")
 
             return True
 
