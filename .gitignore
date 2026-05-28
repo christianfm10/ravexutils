@@ -16,6 +16,10 @@ sessions/
 
 # Log
 *.log
+*.txt
+*.json
+*.db
+*.backup
 
 # Pickle Files
 *.pkl
