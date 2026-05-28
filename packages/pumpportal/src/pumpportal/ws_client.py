@@ -1,8 +1,11 @@
 import logging
 import json
+import os
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
+from yarl import URL
+from shared_lib.baseclient.endpoint import Endpoint
 
 if TYPE_CHECKING:
     from shared_lib.client_context import ClientContext
@@ -11,8 +14,15 @@ ROOM_NEW_TOKEN = "subscribeNewToken"
 ROOM_MIGRATION = "subscribeMigration"
 ROOM_ACCOUNT_TRADE = "subscribeAccountTrade"
 ROOM_TOKEN_TRADE = "subscribeTokenTrade"
+PUMPPORTAL_API_KEY = os.getenv("PUMPPORTAL_API_KEY")
 
-WS_PRIMARY_URL = "wss://pumpportal.fun/api/data"
+
+WS_PRIMARY_URL = f"wss://pumpportal.fun/api/data?api-key={PUMPPORTAL_API_KEY}"
+
+
+class PumpportalEndpoint:
+    base_url = URL(f"wss://pumpportal.fun/api/data?api-key={PUMPPORTAL_API_KEY}")
+    endpoint = Endpoint.from_url(url=base_url)
 
 
 class PumpPortalWSClient(WebSocketClient):
@@ -22,7 +32,8 @@ class PumpPortalWSClient(WebSocketClient):
     UNSUBS_METHOD = f"un{SUBS_METHOD}"
     HEADERS = {}
 
-    WS_PUMP_PORTAL = "wss://pumpportal.fun/api/data"
+    ENDPOINT = PumpportalEndpoint.endpoint
+    # WS_PUMP_PORTAL = "wss://pumpportal.fun/api/data"
 
     def __init__(self, context: "ClientContext | None" = None, **kwargs) -> None:
         """
@@ -84,7 +95,9 @@ class PumpPortalWSClient(WebSocketClient):
         # if self._initialized:
         #     return
 
-        super().__init__(context=context, ws_url=WS_PRIMARY_URL, **kwargs)
+        super().__init__(
+            context=context, ws_url=PumpportalEndpoint.endpoint.str_url, **kwargs
+        )
         self._subs_mints: list[str] = []
         self._subs_accounts: list[str] = []
         self.logger = logging.getLogger("PumpPortalWSClient")
