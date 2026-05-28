@@ -50,7 +50,8 @@ import json
 import logging
 import msgpack
 import pathlib
-from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from axiom.urls import PulseEndpoint
 
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
@@ -111,9 +112,11 @@ class AxiomPulseWSClient(WebSocketClient):
     - Supports custom filters and table selections
     """
 
+    ENDPOINT = PulseEndpoint.endpoint
     HEADERS = {
-        "Origin": "https://axiom.trade",
-        "Host": "pulse2.axiom.trade",
+        "Origin": f"https://{ENDPOINT.domain}",
+        # "Host": "pulse2.axiom.trade",
+        "Host": ENDPOINT.host,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
@@ -144,7 +147,7 @@ class AxiomPulseWSClient(WebSocketClient):
         # Call parent constructor
         super().__init__(
             log_level=log_level,
-            ws_url=WS_PULSE_URL,
+            ws_url=self.endpoint.str_url,
             telegram_bot=telegram_bot,
             client=client,
         )
@@ -154,7 +157,7 @@ class AxiomPulseWSClient(WebSocketClient):
         self.logger.setLevel(log_level)
 
         # Store Pulse configuration for reconnection
-        self._pulse_user_state: Optional[dict[str, Any]] = None
+        self._pulse_user_state: dict[str, Any] | None = None
 
     async def _message_handler(self, message: Any) -> None:
         """
@@ -255,7 +258,7 @@ class AxiomPulseWSClient(WebSocketClient):
     async def subscribe(
         self,
         method: str,
-        callback: Callable[[Dict[str, Any]], Awaitable[None]],
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
         **kwargs,
     ) -> bool:
         """
@@ -287,7 +290,7 @@ class AxiomPulseWSClient(WebSocketClient):
         """
         return await self.unsubscribe_method(method, **kwargs)
 
-    def _load_default_pulse_config(self) -> Dict[str, Any]:
+    def _load_default_pulse_config(self) -> dict[str, Any]:
         """
         Load default Pulse configuration from pulse_send_message.json.
 
@@ -326,7 +329,7 @@ class AxiomPulseWSClient(WebSocketClient):
     async def subscribe_pulse(
         self,
         callback: Callable[[Any], Awaitable[None]],
-        user_state: Optional[Dict[str, Any]] = None,
+        user_state: dict[str, Any] | None = None,
     ) -> bool:
         """
         Subscribe to Pulse analytics with optional custom filters.

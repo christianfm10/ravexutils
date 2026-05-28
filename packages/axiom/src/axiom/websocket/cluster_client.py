@@ -41,7 +41,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
-from ..urls import WSBaseUrls, AxiomBaseUrls
+from ..urls import WSBaseUrls, AxiomBaseUrls, ClusterEndpoint
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
@@ -76,9 +76,10 @@ class AxiomClusterWSClient(WebSocketClient):
     - `b-{address}`: Token-specific market cap updates
     """
 
+    ENDPOINT = ClusterEndpoint.endpoint
     HEADERS = {
-        "Origin": str(AxiomBaseUrls.BASE_URL),
-        "Host": WS_CLUSTER_URL.host,
+        "Origin": f"https://{ENDPOINT.domain}",
+        "Host": ENDPOINT.host,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
@@ -109,7 +110,7 @@ class AxiomClusterWSClient(WebSocketClient):
         # Call parent constructor
         super().__init__(
             log_level=log_level,
-            ws_url=str(WS_CLUSTER_URL),
+            ws_url=self.endpoint.str_url,
             telegram_bot=telegram_bot,
             client=client,
         )
