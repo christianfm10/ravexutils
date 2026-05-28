@@ -55,7 +55,7 @@ class AxiomClient(AuthAioHttpClient):
     """
 
     # BASE_URL: str = AAllBaseUrls.BASE_URL_v8
-    SESSION_FILE: str = "session3.json"
+    SESSION_FILE: str = "session.json"
     ENDPOINT = AxiomEndpoint.endpoint
 
     _DEFAULT_HEADERS: dict[str, str] = {
@@ -78,7 +78,6 @@ class AxiomClient(AuthAioHttpClient):
         self,
         auth_token: str | None = None,
         refresh_token: str | None = None,
-        storage_dir: str | None = None,  # noqa: ARG002 – reserved for future use
         load_cookies: bool = True,
         log_level: int = logging.INFO,
         use_tls_fingerprint: bool = True,

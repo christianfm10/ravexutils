@@ -140,8 +140,9 @@ class BaseAioHttpClient(ABC):
     origin: str = "https://api.example.com"
     host: str | None = "api.example.com"
     domain: str | None = "example.com"
+    SESSIONS_DIR: Path = Path("sessions")
     SESSION_FILE: str = "session.json"
-    session_path: Path = Path(SESSION_FILE)
+    session_path: Path = SESSIONS_DIR / "BaseAioHttpClient" / SESSION_FILE
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-populate BASE_URL and _ORIGIN when ENDPOINT is set."""
@@ -157,17 +158,13 @@ class BaseAioHttpClient(ABC):
         # if "ENDPOINT" not in cls.__dict__:
 
         cls.endpoint: Endpoint = cast(Endpoint, cls.__dict__.get("ENDPOINT", ""))
-        # if cls.endpoint is not None:
-        # cls.base_url = endpoint.base_url
-        # cls.origin = endpoint.origin
-        # cls.host = endpoint.url.host
-        # cls.domain = endpoint.domain
 
     def __init__(
         self,
         base_url: str | None = None,
         proxy: str | None = None,
         cf_clearance: str | None = None,
+        session_path: str | Path | None = None,
         timeout: float = 30.0,
         use_tls_fingerprint: bool = False,
         ecdh_curve: str | None = None,
@@ -210,6 +207,11 @@ class BaseAioHttpClient(ABC):
         self._ecdh_curve = ecdh_curve
         self._cipher_suite = cipher_suite
         self._load_cookies = load_cookies
+        self.session_path = (
+            Path(session_path)
+            if session_path is not None
+            else Path(self.SESSIONS_DIR) / self.__class__.__name__ / self.SESSION_FILE
+        )
 
         # Store user-provided cookie_jar; actual loading happens in _load_cookie_jar()
         # cf_clearance (if any) is injected into the jar at session creation time.
@@ -255,15 +257,15 @@ class BaseAioHttpClient(ABC):
 
     def _load_cookie_jar(self) -> _FixedCookieJar:
         """Load cookies from SESSION_FILE into a fresh jar."""
-        session_path = Path(self.SESSION_FILE)
-        if not session_path.exists():
+        if not self.session_path.exists():
             raise ConfigurationError(
-                f"Session file '{session_path}' not found. "
-                "Save cookies first via save_cookies()."
+                f"Session file not found: '{self.session_path}'. "
+                "Create it first (or run save_cookies()) with content like:\n"
+                '{"cookies": [], "expirations": []}'
             )
         jar = _FixedCookieJar()
-        jar.load(session_path)
-        logger.debug("Cookies loaded from %s", session_path)
+        jar.load(self.session_path)
+        logger.debug("Cookies loaded from %s", self.session_path)
         return jar
 
     def _build_connector(self) -> TCPConnector | None:
@@ -572,7 +574,10 @@ class BaseAioHttpClient(ABC):
         """
         if self.cookie_jar is None:
             raise RuntimeError("No cookie jar available – session not yet initialized.")
-        target = path or Path(self.SESSION_FILE)
+        target = Path(path) if path is not None else self.session_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.touch()
         self.cookie_jar.save(target)
         logger.debug("Cookies saved to %s", target)
 

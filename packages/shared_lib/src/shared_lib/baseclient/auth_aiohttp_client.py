@@ -34,7 +34,7 @@ class AuthAioHttpClient(BaseAioHttpClient):
         Extra keyword arguments forwarded to :class:`BaseAioHttpClient`.
     """
 
-    SESSION_FILE: str = "session3.json"
+    SESSION_FILE: str = "session.json"
     refresh_token_name = "auth-refresh-token"
     auth_token_name = "auth-access-token"
 
@@ -42,7 +42,6 @@ class AuthAioHttpClient(BaseAioHttpClient):
         self,
         auth_token: str | None = None,
         refresh_token: str | None = None,
-        storage_dir: str | None = None,  # noqa: ARG002 – reserved for future use
         load_cookies: bool = True,
         log_level: int = logging.INFO,
         use_tls_fingerprint: bool = True,
@@ -133,7 +132,7 @@ class AuthAioHttpClient(BaseAioHttpClient):
                 # Persist the live session jar (which holds cookies updated by
                 # the server response), not the jar we built at startup.
                 self.logger.info("Saving refreshed tokens to %s", self.SESSION_FILE)
-                cast(_FixedCookieJar, self.session.cookie_jar).save(self.SESSION_FILE)
+                self.save_cookies()
                 self.logger.info("Tokens refreshed successfully")
                 return True
 
