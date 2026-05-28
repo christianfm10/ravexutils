@@ -142,6 +142,7 @@ class BaseAioHttpClient(ABC):
     domain: str | None = "example.com"
     SESSIONS_DIR: Path = Path("sessions")
     SESSION_FILE: str = "session.json"
+    DEFAULT_PROFILE: str = "default"
     session_path: Path = SESSIONS_DIR / "BaseAioHttpClient" / SESSION_FILE
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -165,6 +166,7 @@ class BaseAioHttpClient(ABC):
         proxy: str | None = None,
         cf_clearance: str | None = None,
         session_path: str | Path | None = None,
+        profile: str | None = None,
         timeout: float = 30.0,
         use_tls_fingerprint: bool = False,
         ecdh_curve: str | None = None,
@@ -186,6 +188,11 @@ class BaseAioHttpClient(ABC):
             ecdh_curve: ECDH curve for TLS. Defaults to "secp384r1".
             cipher_suite: Custom cipher suite. Uses browser-like suite by default.
             load_cookies: Load cookies from SESSION_FILE on session creation.
+            profile: Profile name used to differentiate session files.
+                     The session file will be named ``session_{profile}.json``
+                     (derived from SESSION_FILE's stem). Defaults to
+                     ``DEFAULT_PROFILE`` (``"default"``). Ignored when
+                     ``session_path`` is provided explicitly.
             defer_session: If True, skip session creation in __init__. Call
                            ``await init_session()`` manually once inside an event
                            loop. Required when instantiating outside an async
@@ -207,11 +214,16 @@ class BaseAioHttpClient(ABC):
         self._ecdh_curve = ecdh_curve
         self._cipher_suite = cipher_suite
         self._load_cookies = load_cookies
-        self.session_path = (
-            Path(session_path)
-            if session_path is not None
-            else Path(self.SESSIONS_DIR) / self.__class__.__name__ / self.SESSION_FILE
-        )
+        self.profile: str = profile if profile is not None else self.DEFAULT_PROFILE
+        if session_path is not None:
+            self.session_path = Path(session_path)
+        else:
+            _stem = Path(self.SESSION_FILE).stem
+            _suffix = Path(self.SESSION_FILE).suffix
+            _filename = f"{_stem}_{self.profile}{_suffix}"
+            self.session_path = (
+                Path(self.SESSIONS_DIR) / self.__class__.__name__ / _filename
+            )
 
         # Store user-provided cookie_jar; actual loading happens in _load_cookie_jar()
         # cf_clearance (if any) is injected into the jar at session creation time.

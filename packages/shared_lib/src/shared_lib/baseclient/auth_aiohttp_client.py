@@ -3,7 +3,7 @@ from aiohttp import TCPConnector
 import logging
 from abc import abstractmethod
 from http.cookies import SimpleCookie
-from typing import Any, cast
+from typing import Any
 from .aiohttp_client import BaseAioHttpClient, _FixedCookieJar
 
 
