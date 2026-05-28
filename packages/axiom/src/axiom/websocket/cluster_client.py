@@ -51,6 +51,7 @@ WS_CLUSTER_URL = WSBaseUrls.WS_CLUSTER_URL
 
 # Room/channel names for WebSocket subscriptions
 ROOM_NEW_PAIRS = "new_pairs"
+ROOM_TWITTER_PREVIEW = "twitter-preview"
 ROOM_MIGRATIONS = "migrations"
 ROOM_SOL_PRICE = "sol_price"
 ROOM_TOKEN_PREFIX = "b-"  # Token-specific rooms use format: b-{token_address}
@@ -312,6 +313,23 @@ class AxiomClusterWSClient(WebSocketClient):
         }
         return await self.subscribe_method(ROOM_NEW_PAIRS, callback=callback)
 
+    async def subscribe_twitter_preview(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]]
+    ) -> bool:
+        """
+        Subscribe to Twitter preview notifications.
+
+        ## Parameters:
+        - `callback`: Async function called when Twitter preview data arrives
+
+        ## Returns:
+        - `bool`: True if subscription successful
+        """
+        self._active_subscriptions[ROOM_TWITTER_PREVIEW] = {
+            "callback": callback,
+        }
+        return await self.subscribe_method(ROOM_TWITTER_PREVIEW, callback=callback)
+
     async def subscribe_migrations(
         self, callback: Callable[[Dict[str, Any]], Awaitable[None]]
     ) -> bool:
@@ -370,6 +388,31 @@ class AxiomClusterWSClient(WebSocketClient):
         """
         room = f"{ROOM_TOKEN_PREFIX}{token_address}"
         callback_key = f"token_mcap_{token_address}"
+        self._active_subscriptions[callback_key] = {
+            "callback": callback,
+        }
+        return await self.subscribe_method(
+            room, callback=callback, callback_key=callback_key
+        )
+
+    async def subscribe_balances_updates(
+        self,
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
+        wallet_address: str,
+    ) -> bool:
+        """
+        Subscribe to balance updates for all tokens.
+
+        ## Parameters:
+        - `callback`: Async function called when balance update data arrives
+
+        ## Returns:
+        - `bool`: True if subscription successful
+        """
+        # DjQqV6xj8o9sKWbYYqfSXhEBUDsCdTgGwzo3wuvJgDHn_balance_updates
+        room = f"{wallet_address}_balance_updates"
+
+        callback_key = f"{wallet_address}_balance_updates"
         self._active_subscriptions[callback_key] = {
             "callback": callback,
         }

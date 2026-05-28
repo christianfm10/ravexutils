@@ -10,36 +10,18 @@ import aiohttp
 from typing import Any
 from shared_lib.baseclient.auth_aiohttp_client import AuthAioHttpClient
 
-from axiom.urls import AAllBaseUrls, AxiomUrls, AxiomTradeApiUrls
+from axiom.urls import AxiomTradeApiUrls, AxiomEndpoint
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_ORIGIN = "https://axiom.trade"
-_API_HOST = "api8.axiom.trade"
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 )
-_DEFAULT_HEADERS: dict[str, str] = {
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Content-Type": "application/json",
-    "Connection": "keep-alive",
-    "Host": _API_HOST,
-    "Origin": _ORIGIN,
-    "Referer": _ORIGIN + "/",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-site",
-    "TE": "trailers",
-    "User-Agent": _DEFAULT_USER_AGENT,
-}
 
-axiom_urls = AxiomUrls()
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -72,9 +54,25 @@ class AxiomClient(AuthAioHttpClient):
         Extra keyword arguments forwarded to :class:`BaseAioHttpClient`.
     """
 
-    BASE_URL: str = AAllBaseUrls.BASE_URL_v8
+    # BASE_URL: str = AAllBaseUrls.BASE_URL_v8
     SESSION_FILE: str = "session3.json"
-    _ORIGIN: str = _ORIGIN
+    ENDPOINT = AxiomEndpoint.endpoint
+
+    _DEFAULT_HEADERS: dict[str, str] = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Content-Type": "application/json",
+        "Connection": "keep-alive",
+        "Host": ENDPOINT.host,
+        "Origin": ENDPOINT.origin,
+        "Referer": ENDPOINT.origin + "/",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+        "TE": "trailers",
+        "User-Agent": _DEFAULT_USER_AGENT,
+    }
 
     def __init__(
         self,
@@ -84,14 +82,14 @@ class AxiomClient(AuthAioHttpClient):
         load_cookies: bool = True,
         log_level: int = logging.INFO,
         use_tls_fingerprint: bool = True,
-        defer_session: bool = True,
+        defer_session: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(
             auth_token=auth_token,
             refresh_token=refresh_token,
-            base_url=self.BASE_URL,
-            headers=_DEFAULT_HEADERS,
+            base_url=self.endpoint.str_url,
+            headers=self._DEFAULT_HEADERS,
             use_tls_fingerprint=use_tls_fingerprint,
             load_cookies=load_cookies,
             defer_session=defer_session,
@@ -103,7 +101,7 @@ class AxiomClient(AuthAioHttpClient):
 
     async def refresh_request(self) -> aiohttp.ClientResponse:
         """Make the actual refresh request to the server."""
-        self.session.headers.update({"Host": _API_HOST})
+        self.session.headers.update({"Host": self.endpoint.host})
         return await self._fetch_unauthenticated(
             "POST", AxiomTradeApiUrls.REFRESH_TOKEN
         )
