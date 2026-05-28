@@ -25,7 +25,7 @@ class ForceRichHandler(RichHandler):
 def setup_logging(
     log_file: bool = False, log_name: str = "temp.log", markup: bool = False
 ):
-    handlers: list = [RichHandler(markup=markup)]
+    handlers: list = [RichHandler(markup=markup, show_path=False)]
     if log_file:
         rotatating_handler = RotatingFileHandler(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
