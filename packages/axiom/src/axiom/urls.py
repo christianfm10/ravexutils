@@ -1,26 +1,74 @@
 from yarl import URL
 
-
-class AAllBaseUrls:
-    BASE_URL = "https://api.axiomtrade.com"
-    BASE_URL_v2 = "https://api2.axiom.trade"
-    BASE_URL_v3 = "https://api3.axiom.trade"
-    BASE_URL_v4 = "https://api4.axiom.trade"
-    BASE_URL_v5 = "https://api5.axiom.trade"
-    BASE_URL_v6 = "https://api6.axiom.trade"
-    BASE_URL_v7 = "https://api7.axiom.trade"
-    BASE_URL_v8 = "https://api8.axiom.trade"
-    BASE_URL_v9 = "https://api9.axiom.trade"
-    BASE_URL_v10 = "https://api10.axiom.trade"
-    BASE_URL_MAIN = "https://api.axiom.trade"
+from shared_lib.baseclient.endpoint import Endpoint
 
 
 class AxiomBaseUrls:
     BASE_URL = URL("https://axiom.trade")
 
 
+class AxiomEndpoint:
+    base_url = URL("https://axiom.trade")
+    subdomains = [
+        "api",
+        "api2",
+        "api3",
+        "api4",
+        "api5",
+        "api6",
+        "api7",
+        "api8",
+        "api9",
+        "api10",
+    ]
+    endpoint = Endpoint.generate_random_base_and_subdomain(
+        base=base_url, subdomains=subdomains, subdomain_id=8
+    )
+
+
+class GMGNEndpoint:
+    base_url = URL("https://gmgn.ai")
+    endpoint = Endpoint.from_url(url=base_url)
+    pf_path = "/pf/api/v1"
+    vas_path = "/vas/api/v1"
+    td_path = "/td/api/v1"
+
+
+class ClusterEndpoint:
+    base_url = URL("wss://axiom.trade")
+    subdomains = [
+        "cluster2",
+        "cluster3",
+    ]
+    endpoint = Endpoint.generate_random_base_and_subdomain(
+        base=base_url, subdomains=subdomains, subdomain_id=1
+    )
+
+
+class PulseEndpoint:
+    subdomains = [
+        "pulse",
+        "pulse2",
+    ]
+    base_url = URL("wss://axiom.trade/ws")
+    endpoint = Endpoint.generate_random_base_and_subdomain(
+        base=base_url, subdomains=subdomains, subdomain_id=2
+    )
+
+
+class EucalyptusEndpoint:
+    subdomains = [
+        "eucalyptus",
+    ]
+    base_url = URL("wss://axiom.trade/ws")
+    endpoint = Endpoint.generate_random_base_and_subdomain(
+        base=base_url, subdomains=subdomains, subdomain_id=1
+    )
+
+
 class WSBaseUrls:
     WS_CLUSTER_URL = URL("wss://cluster3.axiom.trade/")
+    WS_EUCALYPTUS_URL = URL("wss://eucalyptus.axiom.trade/ws")
     WS_PULSE_URL = URL("wss://pulse2.axiom.trade/ws")
 
 
