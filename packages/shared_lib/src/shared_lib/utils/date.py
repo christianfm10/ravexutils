@@ -3,6 +3,47 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
+# 2026-02-06T04:24:45.050
+def datetime_to_unix_timestamp(dt: datetime, milliseconds: bool = True) -> int:
+    """
+    Convert a datetime object to a Unix timestamp.
+
+    ## Parameters
+    - `dt`: datetime object to convert (should be timezone-aware)
+    - `milliseconds`: True to return timestamp in milliseconds, False for seconds
+
+    ## Returns
+    - Unix timestamp as an integer (in ms if milliseconds=True, else in seconds)
+
+    ## Notes
+    If the datetime is naive (no timezone), it will be treated as UTC.
+    """
+    if dt.tzinfo is None:
+        logger.warning("Naive datetime provided, assuming UTC")
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    timestamp = int(dt.timestamp() * 1000) if milliseconds else int(dt.timestamp())
+    return timestamp
+
+def string_to_datetime(timestamp_str: str) -> datetime | None:
+    """
+    Convert an ISO format timestamp string to a datetime object.
+
+    ## Parameters
+    - `timestamp_str`: ISO format timestamp string (e.g., "2024-12-22T10:30:00Z")
+
+    ## Returns
+    - `datetime` object representing the timestamp in UTC, or None if parsing fails
+
+    ## Notes
+    Gracefully handles malformed timestamps by logging and returning None.
+    """
+    try:
+        dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        return dt
+    except ValueError as e:
+        logger.error(f"Failed to parse timestamp '{timestamp_str}': {e}")
+        return None
 
 def timestamp_to_datetime(
     timestamp: int | float, milliseconds: bool = True
