@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from ..models.token import TokenItem, DevWalletFunding
+from ..models.token import TokenItem
 
 from .config import DISPATCH_CLEANUP_DELAY_SECONDS, FUNDER_TIMEOUT_SECONDS
 
@@ -101,32 +101,11 @@ class PairBuffer:
             pair_item = TokenItem.model_validate(merged)
         else:
             pair_item = TokenItem(**data)
-
-        #######################
-        if existing:
-            if existing.timeout_task:
-                existing.timeout_task.cancel()
-            if existing.uri_fetch_task:
-                existing.uri_fetch_task.cancel()
-
+        ############################
         entry = _PairEntry(item=pair_item)
         self._pairs[addr] = entry
-
-        if pair_item.has_nats_arrived and pair_item.has_pumpportal_arrived:
-            logger.debug(f"Pair {addr} is ready immediately upon arrival")
-            self._dispatch(entry)
-        else:
-            entry.timeout_task = asyncio.create_task(self._nats_timeout_dispatch(addr))
-            # If pumpportal arrived with a URI, start fetching metadata in parallel
-            if (
-                (pair_item.has_pumpportal_arrived or pair_item.has_axiom_arrived)
-                and not pair_item.has_nats_arrived
-                and pair_item.token_uri
-                and self._fetch_metadata
-            ):
-                entry.uri_fetch_task = asyncio.create_task(
-                    self._fetch_uri_and_dispatch(addr, pair_item.token_uri)
-                )
+        if not entry.timeout_task:
+            entry.timeout_task = asyncio.create_task(self._timeout_dispatch(addr))
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
@@ -153,35 +132,19 @@ class PairBuffer:
                 exc_info=True,
             )
 
-    async def _nats_timeout_dispatch(self, pair_address: str) -> None:
+    async def _timeout_dispatch(self, address: str) -> None:
         await asyncio.sleep(self._funder_timeout)
-        entry = self._pairs.get(pair_address)
+        entry = self._pairs.get(address)
         if entry and not entry.dispatched:
-            logger.error(
-                f"Nats timeout for {pair_address} — dispatching without nats data"
+            logger.debug(
+                f"Timeout for {entry.item.token_address} — dispatching with "
+                f"PumpPortal: {entry.item.has_pumpportal_arrived}, "
+                f"Nats: {entry.item.has_nats_arrived}, "
+                f"Pulse: {entry.item.has_pulse_arrived}, "
+                f"Axiom: {entry.item.has_axiom_arrived}, "
+                f"TwitterPrev: {entry.item.has_twitter_arrived}, "
+                f"Funder: {entry.item.dev_wallet_funding.funding_wallet_address if entry.item.dev_wallet_funding else None}"
             )
-            self._dispatch(entry)
-
-    async def _fetch_uri_and_dispatch(self, pair_address: str, uri: str) -> None:
-        """Fetch metadata from the token URI and dispatch if NATS hasn't arrived yet."""
-        try:
-            logger.debug(f"Fetching URI metadata for {pair_address} from {uri}")
-            metadata = await self._fetch_metadata(uri)  # type: ignore[misc]
-        except Exception:
-            logger.error(f"URI fetch failed for {pair_address}", exc_info=True)
-            return
-
-        entry = self._pairs.get(pair_address)
-        if entry is None or entry.dispatched:
-            return
-
-        if metadata:
-            updates = {k: v for k, v in metadata.items() if v is not None}
-            if updates:
-                entry.item = entry.item.model_copy(update=updates)
-            logger.debug(f"URI metadata fetched for {pair_address} — dispatching early")
-            if entry.timeout_task:
-                entry.timeout_task.cancel()
             self._dispatch(entry)
 
     async def _cleanup_after(self, pair_address: str) -> None:
@@ -191,6 +154,10 @@ class PairBuffer:
     def update_fields(self, pair_address: str, updates: dict) -> None:
         """Apply incremental non-funder field updates to a pending pair."""
         entry = self._pairs.get(pair_address)
+        ####
+        has_pulse_arrived = True
+        updates.update({"has_pulse_arrived": has_pulse_arrived})
+        ####
         if entry is None:
             self._early_updates[pair_address] = updates
             return
