@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from ..models.token import TokenItem, DevWalletFunding
+from ..models.token import TokenItem
 
 from .config import DISPATCH_CLEANUP_DELAY_SECONDS, TIMEOUT_SECONDS
 
