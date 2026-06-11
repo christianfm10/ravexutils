@@ -85,9 +85,6 @@ class PairBuffer:
         self._fetch_metadata = fetch_metadata
         self._timeout_only = timeout_only
         self._wait_for_flags = self._resolve_wait_flags(wait_for_ws)
-        print("Waiting for WebSocket flags before dispatch:", wait_for_ws)
-        print("Timeout:", timeout)
-        print(self._wait_for_flags)
 
         self._fetch_metadata_if_missing_nats = fetch_metadata_if_missing_nats
         self._update_db_callback = update_db_callback

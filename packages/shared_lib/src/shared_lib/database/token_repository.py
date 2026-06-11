@@ -142,7 +142,7 @@ class TokenRepository:
                         has_twitter=pair.has_twitter,
                         telegram=pair.telegram,
                         has_telegram=pair.has_telegram,
-                        description=pair.description,
+                        description=pair.description[:20] if pair.description else None,
                         has_description=pair.has_description,
                         desc_size=getattr(pair, "desc_size", None),
                         uri_size=getattr(pair, "uri_size", None),

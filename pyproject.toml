@@ -6,6 +6,7 @@ pumpportal = { workspace = true }
 shared-lib = { workspace = true }
 rpc = { workspace = true }
 axiom = { workspace = true }
+monitor = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -16,6 +17,7 @@ members = [
     "packages/pumpportal",
     "packages/rpc",
     "packages/axiom",
+    "packages/monitor",
 ]
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "ruff"]

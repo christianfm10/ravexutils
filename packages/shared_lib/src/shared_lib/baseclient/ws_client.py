@@ -120,7 +120,7 @@ class WebSocketClient(ABC):
         self.logger.setLevel(effective_log_level)
 
         # Reconnection configuration
-        self._max_reconnect_attempts = 5
+        self._max_reconnect_attempts = 100
         self._reconnect_delay_seconds = 5.0
         self._is_reconnecting = False
         #
@@ -690,7 +690,10 @@ class WebSocketClient(ABC):
 
                 # Wait with exponential backoff
                 if attempt > 1:
-                    delay = self._reconnect_delay_seconds * (2 ** (attempt - 2))
+                    if attempt < 5:
+                        delay = self._reconnect_delay_seconds * (2 ** (attempt - 2))
+                    else:
+                        delay = self._reconnect_delay_seconds * 12  # Max backoff
                     self.logger.info(f"Waiting {delay} seconds before retry...")
                     await asyncio.sleep(delay)
 

@@ -1,0 +1,15 @@
+[project]
+name = "monitor"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "christianfm10", email = "christian.flores@dekoding.pe" }]
+requires-python = ">=3.14"
+
+dependencies = ["shared_lib", "axiom", "pumpfun", "pumpportal"]
+[project.scripts]
+monitor = "monitor:main"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"

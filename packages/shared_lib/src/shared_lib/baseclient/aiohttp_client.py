@@ -245,7 +245,6 @@ class BaseAioHttpClient(ABC):
         }
         self.kwargs = kwargs
 
-        logger.info("Deferred session initialization: %s", defer_session)
         if not defer_session:
             if load_cookies:
                 self.cookie_jar = self._load_cookie_jar()
