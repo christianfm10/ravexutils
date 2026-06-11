@@ -14,7 +14,7 @@ from typing import Awaitable, Callable
 
 from ..models.token import TokenItem, DevWalletFunding
 
-from .config import DISPATCH_CLEANUP_DELAY_SECONDS, FUNDER_TIMEOUT_SECONDS
+from .config import DISPATCH_CLEANUP_DELAY_SECONDS, TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class PairBuffer:
     def __init__(
         self,
         on_ready: ReadyCallback,
-        funder_timeout: float = FUNDER_TIMEOUT_SECONDS,
+        funder_timeout: float = TIMEOUT_SECONDS,
         dispatch_cleanup_delay: float = DISPATCH_CLEANUP_DELAY_SECONDS,
         fetch_metadata: MetadataFetcher | None = None,
     ) -> None:
@@ -207,7 +207,7 @@ pair_buffer: PairBuffer | None = None
 
 def init_pair_buffer(
     on_ready: ReadyCallback,
-    funder_timeout: float = FUNDER_TIMEOUT_SECONDS,
+    funder_timeout: float = TIMEOUT_SECONDS,
     dispatch_cleanup_delay: float = DISPATCH_CLEANUP_DELAY_SECONDS,
     fetch_metadata: MetadataFetcher | None = None,
 ) -> PairBuffer:

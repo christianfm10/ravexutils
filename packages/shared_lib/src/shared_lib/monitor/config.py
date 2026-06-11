@@ -33,14 +33,22 @@ FIELD_SHORT_MAP = {
     4: "token_ticker",
     6: "token_decimals",
     7: "protocol",
+    19: "market_cap_sol",  # Latest market cap value
     33: "migrated_tokens",
     34: "created_at",
     39: "dev_wallet_funding",  # Developer wallet funding information
     41: "dev_tokens",
 }
+
+UPDATE_FIELD_MAP = {
+    19: "market_cap_sol",  # Latest market cap value
+    33: "migrated_tokens",
+    39: "dev_wallet_funding",
+    41: "dev_tokens",
+}
 # How long to wait for dev_wallet_funding before dispatching anyway
 # Funder may never arrive - this prevents pairs from being stuck indefinitely
-FUNDER_TIMEOUT_SECONDS = 15.0
+TIMEOUT_SECONDS = 15.0
 
 # Seconds after dispatch before removing a pair from the buffer
 # Small grace period in case a late update arrives for the same pair

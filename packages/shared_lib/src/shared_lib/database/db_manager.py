@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 from .base import Base
 
-
 logger = logging.getLogger(__name__)
 
 

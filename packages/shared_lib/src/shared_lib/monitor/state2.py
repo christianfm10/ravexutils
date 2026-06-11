@@ -10,11 +10,11 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Iterable
 
 from ..models.token import TokenItem
 
-from .config import DISPATCH_CLEANUP_DELAY_SECONDS, FUNDER_TIMEOUT_SECONDS
+from .config import DISPATCH_CLEANUP_DELAY_SECONDS, TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,15 @@ ReadyCallback = Callable[[TokenItem], Awaitable[None]]
 # Async function that fetches metadata (website, description, twitter, …) from a URI.
 # Returns a dict with the metadata fields, or None on failure.
 MetadataFetcher = Callable[[str], Awaitable[dict | None]]
+UpdateDbCallback = Callable[[dict], Awaitable[None]]
+
+WS_FLAG_MAP: dict[str, str] = {
+    "nats": "has_nats_arrived",
+    "pumpportal": "has_pumpportal_arrived",
+    "pulse": "has_pulse_arrived",
+    "axiom": "has_axiom_arrived",
+    "twitter": "has_twitter_arrived",
+}
 
 
 @dataclass
@@ -62,16 +71,52 @@ class PairBuffer:
     def __init__(
         self,
         on_ready: ReadyCallback,
-        funder_timeout: float = FUNDER_TIMEOUT_SECONDS,
+        timeout: float = TIMEOUT_SECONDS,
         dispatch_cleanup_delay: float = DISPATCH_CLEANUP_DELAY_SECONDS,
         fetch_metadata: MetadataFetcher | None = None,
+        wait_for_ws: Iterable[str] | None = None,
+        timeout_only: bool = True,
+        fetch_metadata_if_missing_nats: bool = False,
+        update_db_callback: UpdateDbCallback | None = None,
     ) -> None:
         self._on_ready = on_ready
-        self._funder_timeout = funder_timeout
+        self._timeout = timeout
         self._cleanup_delay = dispatch_cleanup_delay
         self._fetch_metadata = fetch_metadata
+        self._timeout_only = timeout_only
+        self._wait_for_flags = self._resolve_wait_flags(wait_for_ws)
+        print("Waiting for WebSocket flags before dispatch:", wait_for_ws)
+        print("Timeout:", timeout)
+        print(self._wait_for_flags)
+
+        self._fetch_metadata_if_missing_nats = fetch_metadata_if_missing_nats
+        self._update_db_callback = update_db_callback
         self._pairs: dict[str, _PairEntry] = {}
         self._early_updates: dict[str, dict] = {}
+
+    def _resolve_wait_flags(self, wait_for_ws: Iterable[str] | None) -> set[str]:
+        if wait_for_ws is None:
+            return set()
+        requested = {name.strip().lower() for name in wait_for_ws}
+        invalid = requested - set(WS_FLAG_MAP)
+        if invalid:
+            allowed = ", ".join(sorted(WS_FLAG_MAP))
+            raise ValueError(
+                f"Invalid wait_for_ws values: {sorted(invalid)}. Allowed: {allowed}"
+            )
+        return {WS_FLAG_MAP[name] for name in requested}
+
+    def _is_ready(self, item: TokenItem) -> bool:
+        return all(getattr(item, flag, False) for flag in self._wait_for_flags)
+
+    def _should_try_metadata_fallback(self, item: TokenItem) -> bool:
+        return (
+            self._fetch_metadata_if_missing_nats
+            and self._fetch_metadata is not None
+            and item.token_uri is not None
+            and item.has_pumpportal_arrived
+            and not item.has_nats_arrived
+        )
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -99,13 +144,26 @@ class PairBuffer:
             merged = existing.item.model_dump()
             merged.update(data)
             pair_item = TokenItem.model_validate(merged)
+            entry = existing
+            entry.item = pair_item
         else:
             pair_item = TokenItem(**data)
-        ############################
-        entry = _PairEntry(item=pair_item)
-        self._pairs[addr] = entry
-        if not entry.timeout_task:
+
+            entry = _PairEntry(item=pair_item)
+            self._pairs[addr] = entry
+
+        if entry.timeout_task is None:
             entry.timeout_task = asyncio.create_task(self._timeout_dispatch(addr))
+
+        if not self._timeout_only and self._is_ready(entry.item):
+            self._dispatch(entry)
+            return
+
+        if self._should_try_metadata_fallback(entry.item):
+            if entry.uri_fetch_task is None or entry.uri_fetch_task.done():
+                entry.uri_fetch_task = asyncio.create_task(
+                    self._fetch_uri_and_dispatch(addr, entry.item.token_uri or "")
+                )
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
@@ -133,7 +191,7 @@ class PairBuffer:
             )
 
     async def _timeout_dispatch(self, address: str) -> None:
-        await asyncio.sleep(self._funder_timeout)
+        await asyncio.sleep(self._timeout)
         entry = self._pairs.get(address)
         if entry and not entry.dispatched:
             logger.debug(
@@ -147,18 +205,66 @@ class PairBuffer:
             )
             self._dispatch(entry)
 
+    async def _fetch_uri_and_dispatch(self, pair_address: str, uri: str) -> None:
+        """Fetch token metadata and dispatch early when fallback is enabled."""
+        try:
+            metadata = await self._fetch_metadata(uri)  # type: ignore[misc]
+        except Exception:
+            logger.error(f"URI fetch failed for {pair_address}", exc_info=True)
+            return
+
+        entry = self._pairs.get(pair_address)
+        if entry is None or entry.dispatched:
+            return
+
+        if metadata:
+            updates = {k: v for k, v in metadata.items() if v is not None}
+            if updates:
+                entry.item = entry.item.model_copy(update=updates)
+            logger.debug(
+                f"URI metadata fetched for {pair_address} — dispatching via fallback"
+            )
+            self._dispatch(entry)
+
     async def _cleanup_after(self, pair_address: str) -> None:
         await asyncio.sleep(self._cleanup_delay)
         self._pairs.pop(pair_address, None)
 
-    def update_fields(self, pair_address: str, updates: dict) -> None:
-        """Apply incremental non-funder field updates to a pending pair."""
+    async def _call_update_db_callback(self, payload: dict) -> None:
+        """Run DB update callback safely in background."""
+        try:
+            await self._update_db_callback(payload)  # type: ignore[misc]
+        except Exception:
+            logger.error("update_db_callback failed", exc_info=True)
+
+    def update_fields(
+        self,
+        pair_address: str,
+        updates: dict,
+        update_db: bool = False,
+    ) -> None:
+        """Apply updates or route them directly to DB callback.
+
+        If ``update_db`` is True, this method only forwards payload to
+        ``update_db_callback`` (when configured) and skips all buffer logic:
+        no early update cache, no wait-for-ws checks, and no dispatch.
+        """
+        if update_db:
+            if self._update_db_callback is not None:
+                payload = {"pair_address": pair_address, **updates}
+                asyncio.create_task(self._call_update_db_callback(payload))
+            else:
+                logger.warning(
+                    "update_db=True but no update_db_callback configured for %s",
+                    pair_address,
+                )
+            return
+
         entry = self._pairs.get(pair_address)
-        ####
-        has_pulse_arrived = True
-        updates.update({"has_pulse_arrived": has_pulse_arrived})
-        ####
+
         if entry is None:
+            if update_db:
+                return
             self._early_updates[pair_address] = updates
             return
         if entry.dispatched:
@@ -167,6 +273,19 @@ class PairBuffer:
         data.update(updates)
         entry.item = TokenItem.model_validate(data)
 
+        if not self._timeout_only and self._is_ready(entry.item):
+            self._dispatch(entry)
+            return
+
+        # if self._should_try_metadata_fallback(entry.item):
+        #     if entry.uri_fetch_task is None or entry.uri_fetch_task.done():
+        #         entry.uri_fetch_task = asyncio.create_task(
+        #             self._fetch_uri_and_dispatch(
+        #                 pair_address,
+        #                 entry.item.token_uri or "",
+        #             )
+        #         )
+
 
 # Module-level instance — call init_pair_buffer() once at monitor startup
 pair_buffer: PairBuffer | None = None
@@ -174,18 +293,30 @@ pair_buffer: PairBuffer | None = None
 
 def init_pair_buffer(
     on_ready: ReadyCallback,
-    funder_timeout: float = FUNDER_TIMEOUT_SECONDS,
+    timeout: float = TIMEOUT_SECONDS,
     dispatch_cleanup_delay: float = DISPATCH_CLEANUP_DELAY_SECONDS,
     fetch_metadata: MetadataFetcher | None = None,
+    wait_for_ws: Iterable[str] | None = None,
+    timeout_only: bool = True,
+    fetch_metadata_if_missing_nats: bool = False,
+    update_db_callback: UpdateDbCallback | None = None,
 ) -> PairBuffer:
     """
     Initialize the global pair buffer. Call once at monitor startup.
 
     ## Parameters
     - `on_ready`: Async callback invoked when a pair is ready for analysis
-    - `funder_timeout`: Seconds to wait for funder before dispatching anyway
+    - `timeout`: Seconds to wait for timeout before dispatching anyway
     - `dispatch_cleanup_delay`: Seconds after dispatch before removing from buffer
     - `fetch_metadata`: Optional async function that fetches metadata from a token URI
+        - `wait_for_ws`: Iterable with ws names to require before early dispatch.
+            Allowed: nats, pumpportal, pulse, axiom, twitter.
+        - `timeout_only`: If True, always wait for timeout and ignore wait_for_ws.
+            If False, dispatch immediately when all `wait_for_ws` conditions are met.
+        - `fetch_metadata_if_missing_nats`: If True and nats is missing but pumpportal
+            + token_uri are available, fetch metadata and dispatch early.
+        - `update_db_callback`: Optional async callback for DB-only updates when
+            calling `update_fields(..., update_db=True)`.
 
     ## Example
     ```python
@@ -195,11 +326,17 @@ def init_pair_buffer(
         print(f"{pair.token_name} | funder: {pair.dev_wallet_funding}")
 
     init_pair_buffer(on_ready=analyze_pair)
-    ```
     """
     global pair_buffer
     pair_buffer = PairBuffer(
-        on_ready, funder_timeout, dispatch_cleanup_delay, fetch_metadata
+        on_ready,
+        timeout,
+        dispatch_cleanup_delay,
+        fetch_metadata,
+        wait_for_ws,
+        timeout_only,
+        fetch_metadata_if_missing_nats,
+        update_db_callback,
     )
     return pair_buffer
 

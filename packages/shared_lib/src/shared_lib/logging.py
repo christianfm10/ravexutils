@@ -25,7 +25,7 @@ class ForceRichHandler(RichHandler):
 def setup_logging(
     log_file: bool = False, log_name: str = "temp.log", markup: bool = False
 ):
-    handlers: list = [RichHandler(markup=markup, show_path=False)]
+    handlers: list = [RichHandler(markup=markup, show_path=True)]
     if log_file:
         rotatating_handler = RotatingFileHandler(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
@@ -37,7 +37,8 @@ def setup_logging(
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",
-        datefmt="[%Y-%m-%d %H:%M:%S.%f]",
+        # datefmt="[%Y-%m-%d %H:%M:%S.%f]",
+        datefmt="[%Y-%m-%d %H:%M:%S]",
         # format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=handlers,
     )
