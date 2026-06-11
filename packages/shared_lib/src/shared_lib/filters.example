@@ -1,0 +1,44 @@
+{
+    "filters": {
+        "pumpportal": {
+            "enabled": true,
+            "pool": {
+                "include": [
+                    "pump"
+                ]
+            },
+            "is_mayhem_mode": {
+                "exclude_if_true": true
+            },
+            "solAmount": {
+                "min": 0.0
+            }
+        },
+        "cluster": {
+            "enabled": true,
+            "protocol": {
+                "include": [
+                    "pump v1"
+                ],
+                "case_insensitive": true
+            },
+            "protocol_details.isMayhem": {
+                "exclude_if_true": true
+            },
+            "protocol_details.isOffchain": {
+                "exclude_if_true": false
+            }
+        },
+        "nats": {
+            "enabled": false,
+            "program": {
+                "include": [
+                    "pump"
+                ]
+            },
+            "mayhem_state": {
+                "exclude_if_value": "enabled"
+            }
+        }
+    }
+}
