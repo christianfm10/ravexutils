@@ -246,29 +246,27 @@ class PairBuffer:
         ``update_db_callback`` (when configured) and skips all buffer logic:
         no early update cache, no wait-for-ws checks, and no dispatch.
         """
-        if update_db:
-            if self._update_db_callback is not None:
-                payload = {"pair_address": pair_address, **updates}
-                asyncio.create_task(self._call_update_db_callback(payload))
-            else:
-                logger.warning(
-                    "update_db=True but no update_db_callback configured for %s",
-                    pair_address,
-                )
-            return
 
         entry = self._pairs.get(pair_address)
 
         if entry is None:
             if update_db:
+                if self._update_db_callback is not None:
+                    payload = {"pair_address": pair_address, **updates}
+                    asyncio.create_task(self._call_update_db_callback(payload))
+                else:
+                    logger.warning(
+                        "update_db=True but no update_db_callback configured for %s",
+                        pair_address,
+                    )
                 return
             self._early_updates[pair_address] = updates
-            return
-        if entry.dispatched:
             return
         data = entry.item.model_dump()
         data.update(updates)
         entry.item = TokenItem.model_validate(data)
+        if entry.dispatched:
+            return
 
         if not self._timeout_only and self._is_ready(entry.item):
             self._dispatch(entry)
