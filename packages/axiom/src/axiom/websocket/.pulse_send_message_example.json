@@ -292,7 +292,7 @@
             "migrated": {
                 "protocols": {
                     "raydium": false,
-                    "pump": false,
+                    "pump": true,
                     "mayhem": false,
                     "pumpAmm": false,
                     "launchLab": false,
@@ -314,7 +314,7 @@
                     "bags": false,
                     "soar": false,
                     "printr": false,
-                    "liquidAf": false,
+                    "liquidAf": true,
                     "liquidAfAmm": false,
                     "wavebreak": false
                 },
@@ -323,10 +323,14 @@
                 "dexPaid": false,
                 "mustEndInPump": false,
                 "age": {
-                    "max": null,
+                    "max": 2,
                     "min": null
                 },
                 "userCount": {
+                    "min": null,
+                    "max": null
+                },
+                "axiomCommunityMembers": {
                     "min": null,
                     "max": null
                 },
@@ -421,11 +425,11 @@
                 "telegram": false,
                 "atLeastOneSocial": false,
                 "isStreaming": false,
-                "showPumpOffchain": false,
+                "showPumpOffchain": true,
                 "showCashback": false,
                 "showAgents": false,
                 "showQuoteTokens": {
-                    "sol": false,
+                    "sol": true,
                     "usdc": false,
                     "usd1": false
                 }
