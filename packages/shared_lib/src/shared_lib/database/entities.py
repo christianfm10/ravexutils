@@ -82,9 +82,10 @@ class Token(Base):
         Boolean, nullable=True, default=False
     )
     market_cap_sol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    migration_ts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # supply: Mapped[float | None] = mapped_column(Float, nullable=True)
     # bonding_curve_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     buy_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     website: Mapped[str | None] = mapped_column(String, nullable=True)
     has_website: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -98,6 +99,7 @@ class Token(Base):
     has_description: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    live: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # is_currently_live: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     dev_holds_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
 
