@@ -28,7 +28,8 @@ class WebSocketClient(ABC):
         ws_url: str = WS_PRIMARY_URL,
         telegram_bot: Optional["TelegramBot"] = None,
         client: Optional["AxiomClient"] = None,
-        heartbeat: int = 60,
+        heartbeat: int = 30,
+        receive_timeout: int | None = None,
     ) -> None:
         """
         Initialize WebSocket client with connection and notification settings.
@@ -138,6 +139,7 @@ class WebSocketClient(ABC):
 
         # Timeouts
         self._heartbeat = heartbeat
+        self._receive_timeout = receive_timeout
         # Session will be created when first needed
         self._session: Any = None
 
@@ -308,6 +310,7 @@ class WebSocketClient(ABC):
                     headers=self.HEADERS,
                     # timeout=aiohttp.ClientWSTimeout(ws_receive=5),  # Connection timeout
                     heartbeat=self._heartbeat,
+                    receive_timeout=self._receive_timeout,
                 )
             except RuntimeError:
                 self.logger.error(
