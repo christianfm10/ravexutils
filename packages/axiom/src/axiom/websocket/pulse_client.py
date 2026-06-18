@@ -127,6 +127,7 @@ class AxiomPulseWSClient(WebSocketClient):
         log_level: int = logging.INFO,
         telegram_bot: Optional["TelegramBot"] = None,
         client: Any | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize Axiom Pulse WebSocket client.
@@ -150,6 +151,7 @@ class AxiomPulseWSClient(WebSocketClient):
             ws_url=self.endpoint.str_url,
             telegram_bot=telegram_bot,
             client=client,
+            **kwargs,
         )
 
         # Override logger name
@@ -301,8 +303,22 @@ class AxiomPulseWSClient(WebSocketClient):
         Looks for `pulse_send_message.json` in the same directory as this file.
         Falls back to minimal config if file not found.
         """
-        # Get path to pulse_send_message.json in same directory
-        config_path = pathlib.Path(__file__).parent / "pulse_send_message.json"
+        # Get path to pulse_send_message.json
+        current_dir = pathlib.Path(__file__).parent
+        cwd = pathlib.Path.cwd()
+        filename = "pulse_send_message.json"
+
+        cwd_config_path = cwd / filename
+        local_config_path = current_dir / filename
+
+        if cwd_config_path.exists():
+            config_path = cwd_config_path
+            self.logger.debug(
+                "Loading pulse_send_message.json from current working directory"
+            )
+        else:
+            config_path = local_config_path
+            self.logger.debug("Loading pulse_send_message.json from local directory")
 
         try:
             with open(config_path, "r") as f:

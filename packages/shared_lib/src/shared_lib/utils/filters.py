@@ -20,7 +20,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_CONFIG = Path(__file__).parent.parent / "filters.json"
+
+def _get_default_config_path() -> Path:
+    """
+    Determine the path to filters.json, prioritizing the current working directory.
+    """
+    cwd_path = Path.cwd() / "filters.json"
+    local_path = Path(__file__).parent.parent / "filters.json"
+
+    if cwd_path.exists():
+        return cwd_path
+    return local_path
+
+
+_DEFAULT_CONFIG = _get_default_config_path()
 
 
 # ---------------------------------------------------------------------------

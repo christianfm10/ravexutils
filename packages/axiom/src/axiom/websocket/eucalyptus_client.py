@@ -4,7 +4,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
 from shared_lib.baseclient.ws_client import WebSocketClient
 from shared_lib.utils.notification import show_alert
-from ..urls import WSBaseUrls, AxiomBaseUrls, EucalyptusEndpoint
+from ..urls import WSBaseUrls, EucalyptusEndpoint
 
 if TYPE_CHECKING:
     from telegram import TelegramBot
