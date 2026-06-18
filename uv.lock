@@ -484,6 +484,7 @@ dependencies = [
     { name = "pumpfun" },
     { name = "pumpportal" },
     { name = "shared-lib" },
+    { name = "telegram" },
 ]
 
 [package.metadata]
@@ -492,6 +493,7 @@ requires-dist = [
     { name = "pumpfun", editable = "packages/pumpfun" },
     { name = "pumpportal", editable = "packages/pumpportal" },
     { name = "shared-lib", editable = "packages/shared_lib" },
+    { name = "telegram", editable = "packages/telegram" },
 ]
 
 [[package]]

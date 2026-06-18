@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "christianfm10", email = "christian.flores@dekoding.pe" }]
 requires-python = ">=3.14"
 
-dependencies = ["shared_lib", "axiom", "pumpfun", "pumpportal"]
+dependencies = ["shared_lib", "axiom", "pumpfun", "pumpportal", "telegram"]
 [project.scripts]
 monitor = "monitor:main"
 
