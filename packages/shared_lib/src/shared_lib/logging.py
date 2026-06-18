@@ -1,7 +1,19 @@
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 from rich.logging import RichHandler
 from rich.text import Text
+
+TRACE_LEVEL = 15
+
+LOG_LEVELS = {
+    "TRACE": TRACE_LEVEL,
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
 
 
 class ForceRichHandler(RichHandler):
@@ -26,16 +38,23 @@ def setup_logging(
     log_file: bool = False, log_name: str = "temp.log", markup: bool = False
 ):
     handlers: list = [RichHandler(markup=markup, show_path=True)]
+    log_file = log_file or os.getenv("LOG_FILE", "False").lower() == "true"
     if log_file:
         rotatating_handler = RotatingFileHandler(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
         )
         rotatating_handler.setLevel(logging.WARNING)
         handlers.append(rotatating_handler)
+    logging.addLevelName(TRACE_LEVEL, "TRACE")
     logging.getLogger("nodriver").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    level = LOG_LEVELS.get(
+        os.getenv("LOG_LEVEL", "INFO").upper(),
+        logging.INFO,
+    )
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(message)s",
         # datefmt="[%Y-%m-%d %H:%M:%S.%f]",
         datefmt="[%Y-%m-%d %H:%M:%S]",
