@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import shared_lib.settings  # noqa: F401 – must be first
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -37,7 +38,7 @@ from axiom.client import AxiomClient
 from axiom.websocket import AxiomClusterWSClient, AxiomPulseWSClient, EucalyptusClient
 from pumpfun.ws_client import connect_to_nats
 from pumpportal.ws_client import PumpPortalWSClient
-from shared_lib.logging import setup_logging
+from shared_lib.logging import setup_logging, TRACE_LEVEL
 from shared_lib.models.token import TokenItem
 from shared_lib.monitor.state2 import _buf, init_pair_buffer
 from shared_lib.monitor.config import FIELD_SHORT_MAP, UPDATE_FIELD_MAP
@@ -46,7 +47,7 @@ from shared_lib.database.token_repository import TokenRepository
 from shared_lib.utils.filters import MessageFilter
 from shared_lib.utils.notification import show_alert
 from shared_lib.utils.numbers import human_readable_number
-from shared_lib.database.db_manager import get_async_db_manager
+from shared_lib.database.db_manager import get_async_db_manager, AsyncDatabaseManager
 from shared_lib.utils.uri import close_session, fetch_token_metadata
 from telegram import TelegramBot
 
@@ -60,9 +61,9 @@ from rich.live import Live
 # ── Valid subscription keys ────────────────────────────────────────────────────
 
 VALID_SUBSCRIPTIONS: frozenset[str] = frozenset(
-    {"cluster", "pulse", "pumpportal", "nats", "notifications"}
+    {"cluster", "pulse", "pumpportal", "nats", "notifications", "migrations"}
 )
-
+USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 # ── Configuration dataclass ───────────────────────────────────────────────────
 
@@ -112,6 +113,10 @@ class MonitorConfig:
     If provided, replaces the built-in ``on_ready_complete`` logic entirely.
     """
 
+    # ── Stale token cleanup interval ─────────────────────────────────────────
+    stale_cleanup_interval: int = 60  # Seconds
+    max_age_old_minutes: int = 10  # Minutes
+
 
 # ── Monitor class ─────────────────────────────────────────────────────────────
 
@@ -125,7 +130,11 @@ class Monitor:
     custom dispatch logic.
     """
 
-    def __init__(self, config: MonitorConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: MonitorConfig | None = None,
+        manager: AsyncDatabaseManager | None = None,
+    ) -> None:
         self.config = config or MonitorConfig()
         self._validate_config()
 
@@ -140,7 +149,13 @@ class Monitor:
         self._prices: dict[str, float] = {}
 
         # DB repository (only instantiated when save_to_db=True)
-        self._token_repo = TokenRepository() if self.config.save_to_db else None
+        if self.config.save_to_db and manager is None:
+            raise ValueError(
+                "Database manager must be provided when save_to_db is True"
+            )
+        self._token_repo = (
+            TokenRepository(manager) if self.config.save_to_db and manager else None
+        )
 
     # ── Config validation ─────────────────────────────────────────────────────
 
@@ -211,12 +226,27 @@ class Monitor:
                 funding.funding_wallet_address,
                 funding.funding_wallet_address,
             )
-        if not funding:
+        # if not funding:
+        #     return
+        # if funding and funding.amount_sol < 1:
+        #     return
+        # if pair.complete:
+        #     self._logger.info(
+        #         "Token already complete: %s (%s) | Creator: %s | Sol: %s SOL | Description: %s | Website: %s |"
+        #         "Funding: %s (%s SOL)",
+        #         pair.token_name,
+        #         pair.token_address,
+        #         pair.deployer_address,
+        #         pair.sol_amount,
+        #         pair.description,
+        #         pair.website,
+        #         funding.funding_wallet_address if funding else "N/A",
+        #         funding.amount_sol if funding else "N/A",
+        #     )
+        if pair.is_usdc:
             return
-        if funding and funding.amount_sol < 1:
-            return
-
-        self._logger.info(
+        self._logger.log(
+            TRACE_LEVEL,
             "New token ready: %s (%s) | Creator: %s | Sol: %s SOL | Description: %s | Website: %s |"
             "Funding: %s (%s SOL)",
             pair.token_name,
@@ -238,7 +268,12 @@ class Monitor:
         # )
 
         if self.config.save_to_db and self._token_repo:
-            await self._token_repo.save(pair)
+            if pair.created_at is None:
+                pair.created_at = int(time.time())
+            if pair.migrated:
+                await self._token_repo.update_migrated(pair)
+            else:
+                await self._token_repo.save(pair)
 
     # ── WS message handlers ───────────────────────────────────────────────────
 
@@ -247,10 +282,19 @@ class Monitor:
             content = data.get("content", {})
             if self._filter.should_skip("cluster", content):
                 return
+            extra = content.get("extra")
+            migrated_from = extra.get("migratedFrom") if extra else None
+            protocol = content.get("protocol", "")
+            if migrated_from and migrated_from == "Pump V1":
+                content["migrated"] = True
+            if protocol == "Pump AMM" and not content.get("migrated", False):
+                return
             protocol_details = content.get("protocol_details", {})
+
             content["has_axiom_arrived"] = True
             content["is_cashback_enabled"] = protocol_details.get("cashback", None)
             content["is_offchain_enabled"] = protocol_details.get("isOffchain", None)
+            content["is_usdc"] = protocol_details.get("isUsdc", None)
             _buf().add_pair(content)
         except Exception:
             self._logger.error("Cluster message error", exc_info=True)
@@ -258,11 +302,13 @@ class Monitor:
     async def _handle_pumpportal(self, data: dict) -> None:
         if self._filter.should_skip("pumpportal", data):
             return
+        # print(data)
         data["has_pumpportal_arrived"] = True
         _buf().add_pair(data)
 
     async def _handle_nats(self, msg) -> None:
         data = json.loads(msg.data.decode())
+        print(data)
         if self._filter.should_skip("nats", data):
             return
         data["has_nats_arrived"] = True
@@ -297,6 +343,24 @@ class Monitor:
                     sound="complete.oga",
                 )
 
+    async def _handle_migrations(self, data: dict) -> None:
+        try:
+            timestamp = int(time.time())
+            self._logger.warning(f"data: {data}, timestamp: {timestamp}")
+            content = data.get("content", {})
+            pair = content.get("from", {})
+            # Get current Timestamp UTC in seconds
+            updates = {}
+            updates["pair_address"] = pair
+            updates["migration_ts"] = timestamp
+
+            if self.config.save_to_db and self._token_repo:
+                _buf().update_fields(pair, updates, update_db=True)
+            else:
+                _buf().update_fields(pair, updates)
+        except Exception:
+            self._logger.error("Migrations message error", exc_info=True)
+
     async def _process_pair_update_message(self, message: list[Any]) -> None:
         """
         Process type 1 pulse messages (incremental pair updates).
@@ -329,7 +393,6 @@ class Monitor:
                         updates["dev_wallet_funding"]["fundingWalletAddress"],
                     )
                     updates.update({"has_pulse_arrived": True})
-                # print(updates)
                 # _buf().add_pair(updates)
                 _buf().update_fields(pair_address, updates)
                 self._logger.debug(
@@ -357,9 +420,9 @@ class Monitor:
             pair_address = changes[0]
             token_address = changes[1]
             updates: dict[str, Any] = {}
-            print(
-                f"New pair announcement: {pair_address} (token: {token_address}) with {len(changes)} fields changed"
-            )
+            # print(
+            #     f"New pair announcement: {pair_address} (token: {token_address}) with {len(changes)} fields changed"
+            # )
 
             if not pair_data:
                 return
@@ -373,7 +436,6 @@ class Monitor:
 
             if updates:
                 updates["pair_address"] = pair_address
-                # print(updates)
                 # _buf().add_pair(updates)
                 updates.update({"has_pulse_arrived": True})
                 if "dev_wallet_funding" in updates:
@@ -443,9 +505,11 @@ class Monitor:
     async def _cleanup_stale_tokens(self) -> None:
         """Background task: every 60 s delete tokens with no market cap after 60 min."""
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.config.stale_cleanup_interval)
             if self._token_repo:
-                await self._token_repo.delete_stale()
+                await self._token_repo.delete_stale(
+                    max_age_minutes=self.config.max_age_old_minutes
+                )
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
@@ -463,7 +527,7 @@ class Monitor:
             load_cookies=cfg.load_cookies,
             defer_session=True,
         )
-        self.db_manager = get_async_db_manager()
+        self.db_manager = await get_async_db_manager()
 
         self._init_pair_buffer()
 
@@ -486,10 +550,15 @@ class Monitor:
                 log_level=logging.INFO, client=client, telegram_bot=self._tg_bot
             )
             await ws_cluster.subscribe_new_tokens(self._handle_cluster)
+            if "migrations" in subs:
+                await ws_cluster.subscribe_migrations(self._handle_migrations)
 
         if "pulse" in subs:
             ws_pulse = AxiomPulseWSClient(
-                log_level=logging.INFO, client=client, telegram_bot=self._tg_bot
+                log_level=logging.INFO,
+                client=client,
+                telegram_bot=self._tg_bot,
+                receive_timeout=600,
             )
             await ws_pulse.subscribe_pulse(self._dispatch_pulse_message)
 
@@ -511,8 +580,8 @@ class Monitor:
                 tg.create_task(ws_notifications.start(), name="notifications")
             if "nats" in subs:
                 tg.create_task(self._run_nats(), name="nats")
-            # if self._token_repo:
-            #     tg.create_task(self._cleanup_stale_tokens(), name="stale-cleanup")
+            if self._token_repo:
+                tg.create_task(self._cleanup_stale_tokens(), name="stale-cleanup")
 
         # ── Run with or without Rich Live ─────────────────────────────────────
         try:

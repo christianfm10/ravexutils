@@ -308,7 +308,8 @@ class TokenRepository:
                 )
                 token = result.scalar_one_or_none()
                 if token is None:
-                    _logger.warning(
+                    _logger.log(
+                        TRACE_LEVEL,
                         "No token found for pair_address=%s when updating migration_ts",
                         pair_address,
                     )
