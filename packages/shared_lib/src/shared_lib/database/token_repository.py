@@ -16,17 +16,21 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared_lib.database.db_manager import get_async_db_manager
+from shared_lib.database.db_manager import AsyncDatabaseManager
 from shared_lib.database.entities import DevWalletFunding as DbDevWalletFunding
 from shared_lib.database.entities import Token as DbToken
 from shared_lib.database.entities import Wallet as DbWallet
 from shared_lib.models.token import TokenItem
+from shared_lib.logging import TRACE_LEVEL
 
 _logger = logging.getLogger(__name__)
 
 
 class TokenRepository:
     """CRUD operations on the Token entity and its related Wallet graph."""
+
+    def __init__(self, db_manager: AsyncDatabaseManager):
+        self._db_manager = db_manager
 
     @staticmethod
     async def _upsert_wallet(
@@ -86,7 +90,7 @@ class TokenRepository:
         the whole operation is rolled back and the exception is logged.
         """
         try:
-            db = await get_async_db_manager()
+            db = self._db_manager
             async with db.get_session() as session:
                 # 1. Deployer wallet
                 if pair.deployer_address:
@@ -154,6 +158,60 @@ class TokenRepository:
                 "Failed to save token %s to DB", pair.pair_address, exc_info=True
             )
 
+    async def update_migrated(self, pair: TokenItem) -> None:
+        """
+        Update the 'migrated' status of a token.
+
+        This is a simplified update method specifically for marking a token as
+        migrated when we detect it came from Pump V1. It only updates the
+        'migrated' field and leaves all other fields unchanged.
+        """
+        try:
+            db = self._db_manager
+            async with db.get_session() as session:
+                token_address = pair.token_address
+                result = await session.execute(
+                    select(DbToken).where(DbToken.token_address == token_address)
+                )
+                token = result.scalar_one_or_none()
+                if token is None:
+                    _logger.warning(
+                        "No token found for token_address=%s when updating migrated status",
+                        token_address,
+                    )
+                    return
+                token.migration_ts = pair.created_at
+
+                # ── 3. Upsert DevWalletFunding ────────────────────────────────
+                funding = pair.dev_wallet_funding
+                if funding:
+                    funded = funding.wallet_address
+                    funder = funding.funding_wallet_address
+                    signature = funding.signature
+                    if funded and funder:
+                        await TokenRepository._upsert_wallet(session, funder)
+                        result_dwf = await session.execute(
+                            select(DbDevWalletFunding).where(
+                                DbDevWalletFunding.signature == signature,
+                            )
+                        )
+                        if result_dwf.scalar_one_or_none() is None:
+                            session.add(
+                                DbDevWalletFunding(
+                                    funder_wallet_address=funder,
+                                    funded_wallet_address=funded,
+                                    signature=signature,
+                                    amount_sol=funding.amount_sol,
+                                    funded_at=funding.funded_at,
+                                )
+                            )
+        except Exception:
+            _logger.error(
+                "Failed to update migrated status for token %s in DB",
+                pair.token_address,
+                exc_info=True,
+            )
+
     async def update(self, data: dict) -> None:
         """
         Partially update an existing token by ``pair_address``.
@@ -167,12 +225,14 @@ class TokenRepository:
         If no token with the given ``pair_address`` exists, the call is a no-op.
         """
         try:
-            _logger.warning(f"update: {data}")
-            db = await get_async_db_manager()
+            _logger.log(TRACE_LEVEL, f"update: {data}")
+            db = self._db_manager
             async with db.get_session() as session:
                 pair_address = data.get("pair_address")
                 if not pair_address:
-                    _logger.warning("update() called without pair_address — skipping")
+                    _logger.log(
+                        TRACE_LEVEL, "update() called without pair_address — skipping"
+                    )
                     return
 
                 result = await session.execute(
@@ -180,11 +240,15 @@ class TokenRepository:
                 )
                 token = result.scalar_one_or_none()
                 if token is None:
-                    _logger.warning("No token found for pair_address=%s", pair_address)
+                    _logger.log(
+                        TRACE_LEVEL, "No token found for pair_address=%s", pair_address
+                    )
                     return
 
                 # ── 1. Update Token columns ───────────────────────────────────
-                _skip = {"dev_wallet_funding", "dev_tokens", "migrated_tokens"}
+                _skip = {"dev_wallet_funding", "dev_tokens", "migrated_tokens", "live"}
+                if token.live is not True:
+                    token.live = data.get("live", token.live)
                 for key, value in data.items():
                     if key not in _skip and hasattr(token, key):
                         setattr(token, key, value)
@@ -234,6 +298,29 @@ class TokenRepository:
                 exc_info=True,
             )
 
+    async def update_migration_ts(self, pair_address: str, migration_ts: int) -> None:
+        """Update the migration timestamp for a token."""
+        try:
+            db = self._db_manager
+            async with db.get_session() as session:
+                result = await session.execute(
+                    select(DbToken).where(DbToken.pair_address == pair_address)
+                )
+                token = result.scalar_one_or_none()
+                if token is None:
+                    _logger.warning(
+                        "No token found for pair_address=%s when updating migration_ts",
+                        pair_address,
+                    )
+                    return
+                token.migration_ts = migration_ts
+        except Exception:
+            _logger.error(
+                "Failed to update migration_ts for token %s in DB",
+                pair_address,
+                exc_info=True,
+            )
+
     async def delete_stale(self, max_age_minutes: int = 10) -> int:
         """
         Delete:
@@ -246,18 +333,22 @@ class TokenRepository:
         Tokens are deleted first so their FK reference to wallets is gone
         before the wallet cleanup runs.  Returns the total rows deleted.
         """
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
-        ).isoformat()
+        cutoff = int(
+            (
+                datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+            ).timestamp()
+        )
         try:
-            db = await get_async_db_manager()
+            db = self._db_manager
             async with db.get_session() as session:
                 # 1. Stale tokens (no market cap, past cutoff)
                 token_result = await session.execute(
                     delete(DbToken)
                     .where(DbToken.market_cap_sol.is_(None))
-                    .where(DbToken.created_at.isnot(None))
-                    .where(DbToken.created_at < cutoff)
+                    # .where(DbToken.created_at.isnot(None))
+                    .where(
+                        (DbToken.created_at < cutoff) | (DbToken.created_at.is_(None))
+                    )
                 )
                 deleted_tokens: int = token_result.rowcount  # type: ignore[union-attr]
 
@@ -276,7 +367,8 @@ class TokenRepository:
                 deleted_wallets: int = wallet_result.rowcount  # type: ignore[union-attr]
 
                 if deleted_tokens or deleted_wallets:
-                    _logger.info(
+                    _logger.log(
+                        TRACE_LEVEL,
                         "Deleted %d stale token(s) and %d orphan wallet(s) "
                         "(no market cap older than %d min / not in fundings)",
                         deleted_tokens,

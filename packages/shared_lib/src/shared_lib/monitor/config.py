@@ -21,6 +21,7 @@ FIELD_MAP = {
     26: "bonding_curve_percent",
     33: "migrated_tokens",
     34: "created_at",
+    35: "live",
     39: "dev_wallet_funding",  # Developer wallet funding information
     41: "dev_tokens",
 }
@@ -35,6 +36,7 @@ FIELD_SHORT_MAP = {
     7: "protocol",
     19: "market_cap_sol",  # Latest market cap value
     33: "migrated_tokens",
+    35: "live",
     34: "created_at",
     39: "dev_wallet_funding",  # Developer wallet funding information
     41: "dev_tokens",
@@ -43,6 +45,7 @@ FIELD_SHORT_MAP = {
 UPDATE_FIELD_MAP = {
     19: "market_cap_sol",  # Latest market cap value
     33: "migrated_tokens",
+    35: "live",
     39: "dev_wallet_funding",
     41: "dev_tokens",
 }
@@ -52,7 +55,7 @@ TIMEOUT_SECONDS = 15.0
 
 # Seconds after dispatch before removing a pair from the buffer
 # Small grace period in case a late update arrives for the same pair
-DISPATCH_CLEANUP_DELAY_SECONDS = 10.0
+DISPATCH_CLEANUP_DELAY_SECONDS = 2.0
 
 BATCH_SIZE = 1000
 MAX_DEV_TOKENS_THRESHOLD = 20  # Pairs with more dev tokens are ignored
