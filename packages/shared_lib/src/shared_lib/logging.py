@@ -40,11 +40,15 @@ def setup_logging(
     handlers: list = [RichHandler(markup=markup, show_path=True)]
     log_file = log_file or os.getenv("LOG_FILE", "False").lower() == "true"
     if log_file:
-        rotatating_handler = RotatingFileHandler(
+        rotating_handler = RotatingFileHandler(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
         )
-        rotatating_handler.setLevel(logging.WARNING)
-        handlers.append(rotatating_handler)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(pathname)s - %(message)s", datefmt="%H:%M:%S"
+        )
+        rotating_handler.setFormatter(formatter)
+        rotating_handler.setLevel(logging.WARNING)
+        handlers.append(rotating_handler)
     logging.addLevelName(TRACE_LEVEL, "TRACE")
     logging.getLogger("nodriver").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
