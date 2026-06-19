@@ -44,7 +44,7 @@ def setup_logging(
             log_name, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
         )
         formatter = logging.Formatter(
-            "%(asctime)s - %(pathname)s - %(message)s", datefmt="%H:%M:%S"
+            "%(asctime)s - %(filename)s - %(message)s", datefmt="%H:%M:%S"
         )
         rotating_handler.setFormatter(formatter)
         rotating_handler.setLevel(logging.WARNING)
