@@ -279,6 +279,7 @@ class TokenRepository:
                         result_dwf = await session.execute(
                             select(DbDevWalletFunding).where(
                                 DbDevWalletFunding.signature == signature,
+                                DbDevWalletFunding.funded_wallet_address == funded,
                             )
                         )
                         if result_dwf.scalar_one_or_none() is None:
