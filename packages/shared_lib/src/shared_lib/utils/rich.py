@@ -109,8 +109,8 @@ def build_balance_table(
             table.add_row(
                 wallet[:4] + "…",
                 mint[:4] + "…",
-                f"[{bal_style}]{human_readable_number(balance)}[/{bal_style}]",
-                f"${human_readable_number(_prices.get(mint, 0))}",
+                f"[{bal_style}]{human_readable_number(round(balance, 4))}[/{bal_style}]",
+                f"${human_readable_number(round(_prices.get(mint, 0), 4))}",
             )
             count += 1
             if count >= max_rows:
@@ -120,7 +120,7 @@ def build_balance_table(
 
 def build_log_text() -> Text:
     """Build a Rich Text of recent log lines, newest first."""
-    text = Text(overflow="ellipsis", no_wrap=True)
+    text = Text(overflow="ellipsis", no_wrap=False)
     for line in reversed(list(log_buffer)):
         text.append_text(Text.from_markup(line))
         text.append("\n")

@@ -245,6 +245,10 @@ class Monitor:
         #     )
         if pair.is_usdc:
             return
+        if pair.token_address == USDC:
+            return
+        # if pair.initial_buy != 354_710_743.772565:
+        #     return
         self._logger.log(
             TRACE_LEVEL,
             "New token ready: %s (%s) | Creator: %s | Sol: %s SOL | Description: %s | Website: %s |"
@@ -318,7 +322,7 @@ class Monitor:
         """Track per-wallet token balances from EucalyptusClient trade events."""
         wallet: str = message[1]
         token_amount: float = message[9]
-        usdt_price: float = message[8] * 1_000_000
+        usdt_price: float = message[8] * 1_000_000_000
         mint: str = message[5]
         trade_type: str = message[13]
 

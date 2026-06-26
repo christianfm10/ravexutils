@@ -73,7 +73,7 @@ class EucalyptusClient(WebSocketClient):
         )
 
         # Override logger name
-        self.logger = logging.getLogger("AxiomClusterWS")
+        self.logger = logging.getLogger("EucalyptusClient")
         self.logger.setLevel(log_level)
 
     async def _message_handler(self, message: Any) -> None:

@@ -111,7 +111,7 @@ class PairBuffer:
             self._fetch_metadata_if_missing_nats
             and self._fetch_metadata is not None
             and item.token_uri is not None
-            and item.has_pumpportal_arrived
+            and (item.has_pumpportal_arrived or item.has_axiom_arrived)
             and not item.has_nats_arrived
         )
 
